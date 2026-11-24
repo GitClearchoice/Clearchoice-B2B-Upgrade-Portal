@@ -1,0 +1,134 @@
+import { buildQuery, signQuery } from "./signature.ts";
+import type { UCustomer, UPage, UProduct, UProductPrice, USellPriceTier } from "./types.ts";
+
+export interface UnleashedConfig {
+  apiId: string;
+  apiKey: string;
+  baseUrl?: string;
+  clientType?: string;
+  pageSize?: number;
+  maxRetries?: number;
+  /** Injectable for tests. */
+  fetch?: typeof fetch;
+  /** Injectable for tests (ms). */
+  sleep?: (ms: number) => Promise<void>;
+}
+
+export class UnleashedError extends Error {
+  status: number;
+  body: string;
+  constructor(message: string, status: number, body: string) {
+    super(message);
+    this.name = "UnleashedError";
+    this.status = status;
+    this.body = body;
+  }
+}
+
+type Params = Record<string, string | number | boolean | undefined>;
+
+export class UnleashedClient {
+  private cfg: Required<Omit<UnleashedConfig, "fetch" | "sleep">>;
+  private fetchFn: typeof fetch;
+  private sleep: (ms: number) => Promise<void>;
+
+  constructor(config: UnleashedConfig) {
+    if (!config.apiId || !config.apiKey) throw new Error("Unleashed apiId and apiKey are required");
+    this.cfg = {
+      apiId: config.apiId,
+      apiKey: config.apiKey,
+      baseUrl: (config.baseUrl ?? "https://api.unleashedsoftware.com").replace(/\/+$/, ""),
+      clientType: config.clientType ?? "clearchoice/b2bportal",
+      pageSize: config.pageSize ?? 200,
+      maxRetries: config.maxRetries ?? 4,
+    };
+    this.fetchFn = config.fetch ?? fetch;
+    this.sleep = config.sleep ?? ((ms) => new Promise((r) => setTimeout(r, ms)));
+  }
+
+  /** Signed GET. `path` is e.g. "/Products/2"; params become the signed query string. */
+  async get<T>(path: string, params: Params = {}): Promise<T> {
+    const qs = buildQuery(params);
+    const url = `${this.cfg.baseUrl}${path}${qs ? `?${qs}` : ""}`;
+    const headers = {
+      Accept: "application/json",
+      "Content-Type": "application/json",
+      "api-auth-id": this.cfg.apiId,
+      "api-auth-signature": signQuery(qs, this.cfg.apiKey),
+      "client-type": this.cfg.clientType,
+    };
+
+    for (let attempt = 0; ; attempt++) {
+      const res = await this.fetchFn(url, { method: "GET", headers });
+      if (res.ok) return (await res.json()) as T;
+
+      const body = await res.text().catch(() => "");
+      const retryable = res.status === 429 || res.status >= 500;
+      if (!retryable || attempt >= this.cfg.maxRetries) {
+        throw new UnleashedError(`Unleashed GET ${path} failed: ${res.status}`, res.status, body.slice(0, 500));
+      }
+      const retryAfter = Number(res.headers.get("retry-after"));
+      const wait = Number.isFinite(retryAfter) && retryAfter > 0 ? retryAfter * 1000 : 1000 * 2 ** attempt;
+      await this.sleep(wait);
+    }
+  }
+
+  /** Walks every page of a list endpoint (Unleashed pages by path: /Resource/{page}). */
+  async *paginate<T>(resource: string, params: Params = {}): AsyncGenerator<T> {
+    let page = 1;
+    for (;;) {
+      const data = await this.get<UPage<T>>(`/${resource}/${page}`, { pageSize: this.cfg.pageSize, ...params });
+      for (const item of data.Items ?? []) yield item;
+      const pages = data.Pagination?.NumberOfPages ?? 1;
+      if (page >= pages) return;
+      page++;
+    }
+  }
+
+  async listAll<T>(resource: string, params: Params = {}): Promise<T[]> {
+    const out: T[] = [];
+    for await (const item of this.paginate<T>(resource, params)) out.push(item);
+    return out;
+  }
+
+  products(opts: { modifiedSince?: string; includeObsolete?: boolean } = {}) {
+    return this.listAll<UProduct>("Products", {
+      modifiedSince: opts.modifiedSince,
+      includeObsolete: opts.includeObsolete ? "true" : undefined,
+    });
+  }
+
+  customers(opts: { modifiedSince?: string; includeObsolete?: boolean } = {}) {
+    return this.listAll<UCustomer>("Customers", {
+      modifiedSince: opts.modifiedSince,
+      includeObsolete: opts.includeObsolete ? "true" : undefined,
+    });
+  }
+
+  /** All customer-specific prices, or one customer's with `customerCode`. */
+  productPrices(opts: { customerCode?: string; modifiedSince?: string } = {}) {
+    return this.listAll<UProductPrice>("ProductPrices", {
+      customerCode: opts.customerCode,
+      modifiedSince: opts.modifiedSince,
+    });
+  }
+
+  async sellPriceTiers(): Promise<USellPriceTier[]> {
+    const data = await this.get<UPage<USellPriceTier> | USellPriceTier[] | { SellPriceTier?: USellPriceTier[] }>(
+      "/SellPriceTiers",
+    );
+    if (Array.isArray(data)) return data;
+    if ("Items" in data && Array.isArray(data.Items)) return data.Items;
+    if ("SellPriceTier" in data && Array.isArray(data.SellPriceTier)) return data.SellPriceTier;
+    return [];
+  }
+}
+
+/** Unleashed JSON dates look like "/Date(1712345678000)/"; ISO strings are accepted too. */
+export function parseUnleashedDate(value: string | null | undefined): Date | null {
+  if (!value) return null;
+  const m = /\/Date\((-?\d+)([+-]\d{4})?\)\//.exec(value);
+  if (m) return new Date(Number(m[1]));
+  const d = new Date(value);
+  return Number.isNaN(d.getTime()) ? null : d;
+}

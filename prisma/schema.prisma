@@ -1,0 +1,57 @@
+// Postgres tables for synced Unleashed pricing data. The Shopify app (phase 2+) implements
+// PriceStore (src/sync/store.ts) on these. Not used by the phase 1 scripts, which use FileStore.
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+model UnleashedProduct {
+  code             String   @id // Unleashed ProductCode = Shopify variant SKU
+  description      String?
+  groupName        String?
+  defaultSellPrice Decimal? @db.Decimal(14, 4)
+  tierPrices       Decimal[] @db.Decimal(14, 4) // index 0 = Tier 1; 0 stored as null in app code
+  taxable          Boolean  @default(true)
+  obsolete         Boolean  @default(false)
+  sellable         Boolean  @default(true)
+  syncedAt         DateTime @updatedAt
+
+  @@index([groupName])
+}
+
+model UnleashedCustomer {
+  code     String   @id // Unleashed CustomerCode = Shopify company.externalId
+  name     String?
+  tier     Int?
+  discount Decimal  @default(0) @db.Decimal(7, 6) // fraction, 0.05 = 5%
+  obsolete Boolean  @default(false)
+  syncedAt DateTime @updatedAt
+}
+
+model CustomerPriceRule {
+  id                     String   @id // Unleashed ProductPrice Guid
+  customerCode           String
+  productCode            String?
+  groupName              String?
+  type                   String // "fixed" | "discount"
+  value                  Decimal  @db.Decimal(14, 4)
+  unleashedCustomerPrice Decimal? @db.Decimal(14, 4)
+  minQty                 Decimal  @default(0) @db.Decimal(14, 4)
+  validFrom              String? // YYYY-MM-DD, Sydney
+  validTo                String?
+  syncedAt               DateTime @updatedAt
+
+  @@index([customerCode])
+}
+
+model SyncState {
+  id               Int       @id @default(1)
+  lastFullSyncAt   DateTime?
+  lastChangeSyncAt DateTime?
+  lastError        String?
+}

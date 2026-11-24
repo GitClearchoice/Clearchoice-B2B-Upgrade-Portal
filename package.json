@@ -1,0 +1,21 @@
+{
+  "name": "clearchoice-b2b-portal",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Clearchoice B2B portal: Unleashed client, price sync and pricing engine (phase 1)",
+  "type": "module",
+  "engines": {
+    "node": ">=22.18"
+  },
+  "scripts": {
+    "test": "node --test \"test/**/*.test.ts\"",
+    "sync": "node --env-file=.env scripts/sync.ts",
+    "sync:changes": "node --env-file=.env scripts/sync.ts --changes",
+    "sandbox:check": "node --env-file=.env scripts/sandbox-check.ts",
+    "typecheck": "tsc --noEmit"
+  },
+  "devDependencies": {
+    "@types/node": "^22.10.0",
+    "typescript": "^5.7.0"
+  }
+}
