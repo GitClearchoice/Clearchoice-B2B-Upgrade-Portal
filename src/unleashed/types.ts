@@ -40,10 +40,33 @@ export interface UProduct {
   LastModifiedOn?: string | null;
 }
 
+export interface UAddress {
+  Guid?: string;
+  AddressName?: string | null;
+  AddressType?: string | null; // Postal | Physical | Shipping
+  StreetAddress?: string | null;
+  StreetAddress2?: string | null;
+  Suburb?: string | null;
+  City?: string | null;
+  Region?: string | null;
+  Country?: string | null;
+  PostalCode?: string | null;
+  DeliveryInstruction?: string | null;
+  IsDefault?: boolean | null;
+  Obsolete?: boolean | null;
+}
+
 export interface UCustomer {
   Guid: string;
   CustomerCode: string;
   CustomerName?: string | null;
+  ContactFirstName?: string | null;
+  ContactLastName?: string | null;
+  Email?: string | null;
+  PhoneNumber?: string | null;
+  PaymentTerm?: string | null;
+  CustomerType?: string | null;
+  Addresses?: UAddress[] | null;
   SellPriceTier?: string | null;
   SellPriceTierReference?: { Tier?: number | null; Name?: string | null } | null;
   DiscountRate?: number | null;
@@ -72,4 +95,18 @@ export interface UProductPrice {
 export interface USellPriceTier {
   Tier: number;
   Name: string;
+}
+
+/** One customer's Delivery tab (GET /CustomerDeliveryAddresses). */
+export interface UCustomerDeliveryAddresses {
+  CustomerCode: string;
+  Addresses?: UAddress[] | null;
+}
+
+/** Only the fields we read from GET /SalesOrders. */
+export interface USalesOrder {
+  OrderNumber?: string | null;
+  OrderDate?: string | null;
+  OrderStatus?: string | null;
+  Customer?: { CustomerCode?: string | null } | null;
 }

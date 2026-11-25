@@ -13,6 +13,8 @@
     "sync:changes": "node --env-file=.env scripts/sync.ts --changes",
     "sandbox:check": "node --env-file=.env scripts/sandbox-check.ts",
     "price": "node --env-file-if-exists=.env scripts/price.ts",
+    "trade:candidates": "node --env-file=.env scripts/trade-candidates.ts",
+    "import:companies": "node --env-file=.env scripts/import-companies.ts",
     "typecheck": "tsc --noEmit"
   },
   "devDependencies": {

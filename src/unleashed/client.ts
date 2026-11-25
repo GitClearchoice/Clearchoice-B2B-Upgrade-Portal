@@ -1,5 +1,5 @@
 import { buildQuery, signQuery } from "./signature.ts";
-import type { UCustomer, UPage, UProduct, UProductPrice, USellPriceTier } from "./types.ts";
+import type { UCustomer, UCustomerDeliveryAddresses, UPage, UProduct, UProductPrice, USalesOrder, USellPriceTier } from "./types.ts";
 
 export interface UnleashedConfig {
   apiId: string;
@@ -111,6 +111,21 @@ export class UnleashedClient {
       customerCode: opts.customerCode,
       modifiedSince: opts.modifiedSince,
     });
+  }
+
+  /** Every customer's Delivery tab, or one customer's (customerCode matches codes starting with the value). */
+  customerDeliveryAddresses(opts: { customerCode?: string } = {}) {
+    return this.listAll<UCustomerDeliveryAddresses>("CustomerDeliveryAddresses", { customerCode: opts.customerCode });
+  }
+
+  /**
+   * Sales orders by order date (YYYY-MM-DD). Unleashed returns full orders with lines, so we
+   * keep only the fields we need as we go rather than holding thousands of orders in memory.
+   */
+  async *salesOrders(opts: { startDate: string; endDate?: string }): AsyncGenerator<USalesOrder> {
+    for await (const o of this.paginate<USalesOrder>("SalesOrders", { startDate: opts.startDate, endDate: opts.endDate })) {
+      yield { OrderNumber: o.OrderNumber, OrderDate: o.OrderDate, OrderStatus: o.OrderStatus, Customer: { CustomerCode: o.Customer?.CustomerCode } };
+    }
   }
 
   async sellPriceTiers(): Promise<USellPriceTier[]> {

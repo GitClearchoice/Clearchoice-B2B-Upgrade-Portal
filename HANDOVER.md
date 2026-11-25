@@ -5,14 +5,19 @@ Upload this file to the new Claude project, then start a chat with:
 
 ## Decisions made
 - Store: clearchoiceproducts.com, Shopify **Grow** plan. Dev store: **clearchoice-upgrade.myshopify.com**.
-- Unleashed is the inventory system. Orders already sync Shopify → Unleashed via the **Unleashed Software public app**. The "Trade+ Portal" is Unleashed's own separate B2B portal.
+- Unleashed is the inventory system. **Retail** orders sync Shopify → Unleashed via the **Unleashed Software public app** (Shopify Order Status = Paid, on both live and dev integrations). **Trade orders don't use that app** (see below). The "Trade+ Portal" is Unleashed's own separate B2B portal.
 - ~200 trade customers. Most use Unleashed **Sell Price Tiers**; ~10% have their own Customer Pricing.
 - Trade customers pay **on account, net terms, invoiced later**.
 - Chosen approach: **Option A**: a custom Shopify app on Grow that places trade orders as **B2B draft orders** with Unleashed prices (no Shopify Functions, no Plus-only features).
+- **Trade orders go straight to Unleashed via its API (decided 26 Nov).** The app creates the Unleashed sales order itself: customer = company's Unleashed code, delivery name = site name, PO number = Customer Reference. The Shopify draft order stays a draft (the Shopify-side record) and is never completed, so the Unleashed Shopify app never imports it and can't duplicate it.
+  - Why: the 26 Nov sandbox test showed the Unleashed Shopify app is person-based. It created a new customer from the buyer (code = Shopify customer ID) instead of using the company's Unleashed customer, used the site contact as delivery name, and dropped the PO number. Only the price was right.
 - Budgets: a **monthly total per delivery site**, goods only (ex GST, ex freight).
   - Set by **one head-office admin per customer** for all of that customer's sites.
   - Orders that would go over budget are **sent for approval** to that admin.
   - A page shows site budgets (editable), an **annual budget summary** and a **per-site order history report**.
+- Store prices are **ex GST**; Shopify adds GST at checkout. Draft order lines use the engine's ex-GST unit price as `priceOverride`.
+- Hosting: **Render** (app + Postgres).
+- Email sender: **service@clearchoiceproducts.com** (needs SPF/DKIM DNS records for the chosen email service).
 - Claude writes the code.
 - GitHub repo: https://github.com/GitClearchoice/Clearchoice-B2B-Upgrade-Portal
 
@@ -24,19 +29,22 @@ Upload this file to the new Claude project, then start a chat with:
    - the Unleashed sandbox API ID and key go in `.env` only (Unleashed keys can't be regenerated; never paste the live key into a chat).
 
 ## Open questions
-- Do store prices include GST?
-- Does the Unleashed Shopify app import draft-originated B2B orders with the right site and prices? Test this first.
+- Unleashed sales order on create: status **Placed** or **Parked**? Which **warehouse** and **tax code** (e.g. G.S.T.) to use?
+- Trade buyers won't see portal orders in their Shopify account's order list (drafts aren't shown there); the portal's order history page covers this. OK?
 - Quantity Prices: supported; confirm against 1-CT-0014 in the sandbox.
-- Hosting account (Fly.io or Render) and email sender domain.
-- Approximate SKU count.
+- Email service: Postmark or Resend (sender service@clearchoiceproducts.com).
 
 ## Next steps
-Phase 1 code is written and unit-tested (35 tests, see README.md): Unleashed client, nightly full sync + daytime changes sync, pricing engine, cart pricing.
-Done 25 Nov: code pushed to the repo; sandbox check passed (auth OK; 9,023 products, 2,832 customers, 4,307 customer price lines).
-Confirmed: Customer.DiscountRate is a fraction (0.02 = 2%); ProductPrices DiscountValue is a fraction too (0.1 = 10%), fixed in the mapper.
-Quantity Prices added (product lines with no customer in /ProductPrices); quick check: `npm run price -- CUST SKU QTY...`.
-Still to do for phase 1: compare 5–10 prices from `npm run sandbox:check -- CUSTCODE SKU QTY` with real Unleashed sales orders (README, "Sandbox checks").
-Then phase 2: scaffold the Shopify app (Shopify CLI, React Router), move storage to Postgres (prisma/schema.prisma), import companies/sites and link them to Unleashed customer codes.
+**Phase 1 — complete (25 Nov).** Unleashed client, nightly/changes sync, pricing engine (incl. Quantity Prices), quick check `npm run price -- CUST SKU QTY...`. Prices match Unleashed sales orders for tier, quantity-price and customer-pricing cases. Sandbox: 9,023 products, 2,832 customers, 4,307 customer price lines, 10 quantity prices. Confirmed formats: Customer.DiscountRate and ProductPrices.DiscountValue are fractions (0.1 = 10%).
+
+**Draft-order → Unleashed test (26 Nov).** Completed B2B draft order (Net terms) imported via the Unleashed Shopify app with Shopify Order Status = Pending. Result: price correct; customer wrong (new customer created from the buyer, Peter Zakinthos, instead of ASSETLINKSERVICESPTYLTD); delivery name wrong (site contact Marco Polo instead of Western Sydney International Airport); PO number missing (should be Customer Reference). **Decision: trade orders go straight to Unleashed via the API** (see Decisions and Order flow). Dev store integration set back to Paid; test order and the extra customer to be deleted from the sandbox.
+
+**Phase 2 — code written (26 Nov), not yet run.** Decisions: trade customers = ordered in the last 12 months, reviewed in a CSV (numeric web-customer codes default to N); sites = Unleashed Delivery tab; head-office admin = Unleashed primary contact. Shopify B2B companies, locations and net terms are available on Grow, and the current Admin API has no Plus restriction on company mutations.
+1. Add Dev Dashboard app scopes `write_companies`, `write_customers`, `read_payment_terms`; reinstall on the dev store; put Shopify credentials in `.env`.
+2. `npm run trade:candidates` → review `data/trade-customers.csv`.
+3. `npm run import:companies -- --only "CODE"` (dry run), then `--apply` for one, check in Shopify admin, then all.
+
+**Phase 3 next:** scaffold the Shopify app (Shopify CLI, React Router) on Render with Postgres (prisma/schema.prisma), price display + "Place order". Before then, copy the live theme and a few hundred products (SKUs = Unleashed codes) into the dev store.
 
 ---
 
@@ -51,8 +59,8 @@ Pricing order, mirroring Unleashed:
 
 ## Shopify data model
 - **Company** = Unleashed customer (`company.externalId` = Unleashed Customer Code).
-- **Company location** = delivery site (its own address, net terms).
-- **Head-office admin** = company contact flagged `b2b.budget_admin`.
+- **Company location** = delivery site from the customer's Unleashed Delivery tab (`externalId` = Unleashed address Guid; its own address, net terms from the Unleashed payment term).
+- **Head-office admin** = Unleashed primary contact → company main contact, Location admin on every site, and company metafield `b2b.budget_admin_contact` = the contact's GID.
 - **Budgets** = metaobject `site_budget` {location, year, month, amount_ex_gst}, plus a default monthly amount per location.
 - Variant SKU = Unleashed Product Code.
 
@@ -67,12 +75,20 @@ Pricing order, mirroring Unleashed:
    - shows customer prices on product, collection and cart pages;
    - replaces Checkout with "Place order" for trade customers, with PO number and site.
 4. **App proxy endpoints** (signed): prices, place-order, budget status.
-5. **Order flow:**
+5. **Order flow** (revised 26 Nov: trade orders go straight to Unleashed):
    1. Work out prices on the server.
-   2. `draftOrderCreate` (company/location, variantId + priceOverride, PO number, net terms).
+   2. `draftOrderCreate` (company/location, variantId + priceOverride ex GST, PO number, net terms, tag `trade-order`). **Never completed**: it stays a draft as the Shopify-side record.
    3. Budget check: the site's month-to-date spend (Sydney calendar month) + this order's goods ex GST, compared with that month's budget.
-      - **Within budget:** complete the draft with payment pending → an order is created → the Unleashed app syncs it.
-      - **Over budget:** tag the draft `awaiting-approval`, lock prices, email the head-office admin. Approve → complete. Reject → cancel and notify the buyer.
+      - **Within budget:** send the order to Unleashed (below), tag the draft `sent-to-unleashed`, store the Unleashed order number on the draft and in the app DB, email the buyer a confirmation.
+      - **Over budget:** tag the draft `awaiting-approval`, lock prices, email the head-office admin. Approve → send to Unleashed. Reject → tag `rejected`, notify the buyer.
+   4. **Send to Unleashed** (`POST /SalesOrders/{guid}`):
+      - `Customer.CustomerCode` = company `externalId`; `CustomerRef` = PO number.
+      - `DeliveryName` = company location name; delivery street/suburb/city/region/postcode/country = the location's shipping address.
+      - Lines: `Product.ProductCode` = SKU, `OrderQuantity`, `UnitPrice` ex GST, `LineTotal`, `LineTax` (10% GST on taxable products).
+      - `SubTotal` / `TaxTotal` / `Total` (sum of lines; Total = SubTotal + TaxTotal), `Tax`/`TaxRate`, `ExchangeRate` = 1, `OrderStatus` (see open questions).
+      - `Comments`: Shopify draft name, buyer name and email.
+      - The app generates the order's Guid and saves it **before** posting, so a retry can never create a duplicate.
+      - If Unleashed rejects or is down: the draft is tagged `unleashed-failed`, the order is retried automatically, and Clearchoice staff are emailed. The buyer still sees "order received".
 6. **Customer account page "Site budgets"** (head-office admin only):
    - monthly budget per site per month;
    - annual summary;
@@ -89,11 +105,13 @@ Pricing order, mirroring Unleashed:
 - Locations set to "Submit all orders as drafts for review", as a safety net if a buyer reaches native checkout.
 - One-time shipping addresses turned off.
 - Prices always recalculated on the server.
+- Trade drafts are never completed, so the Unleashed Shopify app (set to import Paid orders only) can't import them.
+- Stock: trade orders don't reduce Shopify inventory directly; Unleashed allocates the stock and its normal stock export updates Shopify.
 
 ## Phases
 1. Unleashed client + pricing engine
 2. Company/site import and linking
-3. Price display + "Place order" (within budget)
+3. Price display + "Place order" (within budget). **Start with a one-off script that creates a test order for Assetlink in the Unleashed sandbox via the API**, and check customer, delivery name/address, Customer Reference and prices before building on it.
 4. Budgets, approvals, emails
 5. Site budgets page and reports
-6. Staging tests (incl. the Unleashed sync check) → production
+6. Staging tests (incl. retail orders still importing via the Unleashed Shopify app, trade orders arriving via the API, no duplicates) → production

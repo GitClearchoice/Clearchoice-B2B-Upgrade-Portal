@@ -22,6 +22,32 @@ See `HANDOVER.md` for the decisions, the spec and the phase plan.
 
 Customer Pricing is **not** reduced again by the customer discount.
 
+## Phase 2: trade customers → Shopify companies (dev store)
+
+Trade customer = ordered in the last 12 months (Unleashed sales orders), reviewed by you.
+
+| Unleashed | Shopify |
+|---|---|
+| Customer (code, name) | Company (`externalId` = customer code) |
+| Each address on the customer's **Delivery** tab | Company location (`externalId` = Unleashed address Guid; delivery instruction → location note) |
+| Primary contact (name + email) | Company contact, main contact, **Location admin** on every site, and company metafield `b2b.budget_admin_contact` |
+| Payment term ("30 Days") | Location payment terms (Net 30; unreadable terms use `DEFAULT_NET_DAYS`) |
+
+Every location is set to **submit orders as drafts** and **no one-time shipping addresses** (the handover's safeguards).
+No customer gets emailed: creating contacts doesn't send account invites.
+
+```bash
+npm run trade:candidates                          # writes data/trade-customers.csv to review in Excel
+npm run import:companies -- --only "CODE"         # dry run for one customer (no changes)
+npm run import:companies -- --only "CODE" --apply # create that one; check it in Shopify admin
+npm run import:companies                          # dry run for everyone marked Include = Y
+npm run import:companies -- --apply               # create them all (safe to re-run)
+```
+
+Reports: `data/import-dry-run.csv` / `data/import-report.csv`. The import never deletes or overwrites; re-running adds only what's missing (new sites, a missing admin).
+
+Shopify setup: in the Dev Dashboard app, add the scopes `write_companies`, `write_customers`, `read_payment_terms`, release a new version and reinstall it on the dev store. Put `SHOPIFY_SHOP`, `SHOPIFY_CLIENT_ID`, `SHOPIFY_CLIENT_SECRET` in `.env`.
+
 ## Running it
 
 Needs Node 22.18 or later. No runtime dependencies.

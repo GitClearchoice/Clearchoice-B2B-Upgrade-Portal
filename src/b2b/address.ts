@@ -1,0 +1,87 @@
+import type { UAddress } from "../unleashed/types.ts";
+
+/** Shopify CompanyAddressInput (the fields we fill). */
+export interface ShopifyAddress {
+  address1: string;
+  address2?: string;
+  city: string;
+  zoneCode?: string;
+  zip?: string;
+  countryCode: string;
+  recipient?: string;
+}
+
+const COUNTRIES: Record<string, string> = {
+  australia: "AU", au: "AU", aus: "AU",
+  "new zealand": "NZ", nz: "NZ",
+};
+
+const AU_STATES: Record<string, string> = {
+  nsw: "NSW", "new south wales": "NSW",
+  vic: "VIC", victoria: "VIC",
+  qld: "QLD", queensland: "QLD",
+  sa: "SA", "south australia": "SA",
+  wa: "WA", "western australia": "WA",
+  tas: "TAS", tasmania: "TAS",
+  nt: "NT", "northern territory": "NT",
+  act: "ACT", "australian capital territory": "ACT",
+};
+
+const clean = (s: string | null | undefined) => (s ?? "").replace(/\s+/g, " ").trim();
+
+export interface AddressResult {
+  address?: ShopifyAddress;
+  problems: string[];
+}
+
+/**
+ * Unleashed address → Shopify company address. Country defaults to Australia when blank.
+ * Unleashed uses Suburb and City inconsistently, so we use City, falling back to Suburb.
+ */
+export function toShopifyAddress(a: UAddress, recipient?: string): AddressResult {
+  const problems: string[] = [];
+  const address1 = clean(a.StreetAddress);
+  const address2 = clean(a.StreetAddress2);
+  const city = clean(a.City) || clean(a.Suburb);
+  const countryRaw = clean(a.Country).toLowerCase();
+  const countryCode = countryRaw ? COUNTRIES[countryRaw] ?? (countryRaw.length === 2 ? countryRaw.toUpperCase() : "") : "AU";
+  const regionRaw = clean(a.Region).toLowerCase();
+  const zip = clean(a.PostalCode);
+
+  if (!address1) problems.push("no street address");
+  if (!city) problems.push("no suburb/city");
+  if (!countryCode) problems.push(`unknown country "${a.Country}"`);
+  let zoneCode: string | undefined;
+  if (countryCode === "AU") {
+    zoneCode = AU_STATES[regionRaw];
+    if (!zoneCode) problems.push(regionRaw ? `unknown state "${a.Region}"` : "no state");
+    if (!/^\d{4}$/.test(zip)) problems.push(zip ? `postcode "${zip}" isn't 4 digits` : "no postcode");
+  }
+  if (problems.length) return { problems };
+  return {
+    address: {
+      address1,
+      ...(address2 ? { address2 } : {}),
+      city,
+      ...(zoneCode ? { zoneCode } : {}),
+      ...(zip ? { zip } : {}),
+      countryCode,
+      ...(recipient ? { recipient } : {}),
+    },
+    problems,
+  };
+}
+
+/**
+ * A stable key so re-running the import recognises sites it already created. The Unleashed
+ * address Guid is unique on its own; without one we fall back to code + name (kept to 64 chars).
+ */
+export function siteExternalId(customerCode: string, a: UAddress): string {
+  if (a.Guid) return a.Guid;
+  const name = clean(a.AddressName) || `${clean(a.StreetAddress)} ${clean(a.PostalCode)}`;
+  return `${customerCode}|${name.toLowerCase()}`.slice(0, 64);
+}
+
+export function siteName(a: UAddress): string {
+  return clean(a.AddressName) || [clean(a.StreetAddress), clean(a.City) || clean(a.Suburb)].filter(Boolean).join(", ") || "Main site";
+}
