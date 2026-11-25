@@ -1,5 +1,5 @@
 import { PricingError, resolvePrice } from "./pricing/engine.ts";
-import type { PricingSettings, QuantityPrice, ResolvedPrice } from "./pricing/types.ts";
+import type { PricingSettings, ResolvedPrice } from "./pricing/types.ts";
 import type { PriceStore } from "./sync/store.ts";
 
 export * from "./unleashed/client.ts";
@@ -24,7 +24,7 @@ export async function priceLines(
   store: PriceStore,
   customerCode: string,
   lines: CartLine[],
-  opts: { at?: Date; quantityPrices?: QuantityPrice[]; settings?: Partial<PricingSettings> } = {},
+  opts: { at?: Date; settings?: Partial<PricingSettings> } = {},
 ): Promise<{ lines: ResolvedPrice[]; goodsExGst: number; errors: { sku: string; error: string }[] }> {
   const customer = await store.getCustomer(customerCode);
   if (!customer) throw new PricingError(`Unknown customer ${customerCode}`);
@@ -40,7 +40,8 @@ export async function priceLines(
       continue;
     }
     try {
-      out.push(resolvePrice({ product, customer, quantity: line.quantity, rules, ...opts }));
+      const quantityPrices = await store.getQuantityPrices(product.code);
+      out.push(resolvePrice({ product, customer, quantity: line.quantity, rules, quantityPrices, ...opts }));
     } catch (e) {
       errors.push({ sku: line.sku, error: (e as Error).message });
     }

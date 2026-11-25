@@ -16,7 +16,7 @@ See `HANDOVER.md` for the decisions, the spec and the phase plan.
 
 ### Pricing order
 1. **Customer Pricing**: product line first, then product-group line. Only lines that are valid today (Sydney date, inclusive) and whose minimum quantity is met; the highest qualifying minimum quantity wins. If Unleashed returns its own calculated `CustomerPrice`, that's used; otherwise fixed price, or % off the customer's tier price (or Default Sell Price).
-2. **Quantity Prices**: supported by the engine, but **not synced yet** (see open questions).
+2. **Quantity Prices** (product record > Sale > Quantity Prices; apply to every customer): synced from `/ProductPrices` lines that have a product but no customer. Highest qualifying minimum quantity wins; dates respected; % off is from the Default Sell Price unless Unleashed returns its own price.
 3. **Sell Price Tier** less the customer's `DiscountRate`.
 4. **Default Sell Price**: used when the customer has no tier or the tier is blank on that product. The customer discount also applies here (switch: `applyDiscountToDefault`).
 
@@ -31,6 +31,7 @@ cp .env.example .env          # add the NEW sandbox API ID and key
 npm test                      # 35 tests, no network needed
 npm run sandbox:check         # checks auth, shows field formats, does a full sync
 npm run sandbox:check -- CUSTCODE SKU 5   # prices one line; compare with an Unleashed sales order
+npm run price -- CUSTCODE SKU 1 48 50   # quick: prices from the last sync, no Unleashed calls
 npm run sync                  # nightly full sync (cron at ~2am Sydney)
 npm run sync:changes          # optional daytime top-up
 ```
@@ -45,6 +46,6 @@ npm run sync:changes          # optional daytime top-up
 
 ## Open questions (carried from the handover)
 - Do store prices include GST? The engine returns both ex and inc GST, so either way works.
-- Quantity Prices: the public API docs show no endpoint for product-level quantity breaks (only Customer Pricing with a minimum quantity). If Clearchoice uses them, they need a source (CSV export or another endpoint) before phase 3.
+- Quantity Prices: assumed to be the `/ProductPrices` lines with no customer (10 in the sandbox). Confirm with `npm run price` on a product that has one (e.g. 1-CT-0014), either side of its minimum quantity.
 - Does the Unleashed Shopify app import draft-originated B2B orders with the right site and prices? (Phase 6 test, worth doing early.)
 - Hosting (Fly.io or Render), email sender domain, approximate SKU count.

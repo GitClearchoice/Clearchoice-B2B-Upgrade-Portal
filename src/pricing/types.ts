@@ -41,11 +41,21 @@ export interface CustomerPriceRule {
   validTo: string | null;
 }
 
-/** Product-level quantity price break (Unleashed Quantity Prices). Optional in phase 1. */
+/**
+ * Product-level Quantity Price (Unleashed product record > Sale > Quantity Prices).
+ * Applies to every customer. Comes from /ProductPrices lines that have a product but no customer.
+ */
 export interface QuantityPrice {
+  id: string;
   productCode: string;
+  type: "fixed" | "discount";
+  /** Fixed price, or percent off the Default Sell Price (10 = 10%). */
+  value: number;
+  /** The price Unleashed itself calculated, when returned. Preferred when present. */
+  unleashedPrice: number | null;
   minQty: number;
-  price: number;
+  validFrom: string | null;
+  validTo: string | null;
 }
 
 export type PriceSource =

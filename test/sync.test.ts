@@ -4,7 +4,7 @@ import { mkdtemp } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { UnleashedClient } from "../src/unleashed/client.ts";
-import { mapCustomer, mapProduct, mapProductPrice } from "../src/sync/mappers.ts";
+import { mapCustomer, mapProduct, mapProductPrice, mapQuantityPrice } from "../src/sync/mappers.ts";
 import { FileStore, MemoryStore } from "../src/sync/store.ts";
 import { changesSync, fullSync } from "../src/sync/sync.ts";
 import { priceLines } from "../src/index.ts";
@@ -37,8 +37,9 @@ const uPrices = [
   { Guid: "pp1", Customer: { CustomerCode: "SERCO" }, Product: { ProductCode: "BLADE350" }, PriceType: "Fixed Price",
     CustomerPrice: 199, MinimumQuantity: 0, ValidFrom: null, ValidTo: null },
   { Guid: "pp2", Customer: { CustomerCode: "SERCO" }, ProductGroup: { GroupName: "Mops" }, PriceType: "Discount %",
-    DiscountValue: 25, MinimumQuantity: 10, ValidFrom: "/Date(1764028800000)/", ValidTo: null },
-  { Guid: "pp3", PriceType: "Fixed Price", CustomerPrice: 1 }, // no customer -> skipped
+    DiscountValue: 0.25, MinimumQuantity: 10, ValidFrom: "/Date(1764028800000)/", ValidTo: null },
+  { Guid: "pp3", PriceType: "Fixed Price", CustomerPrice: 1 }, // no customer, no product -> skipped
+  { Guid: "qp1", Product: { ProductCode: "MOP01" }, PriceType: "Fixed Price", CustomerPrice: 17, MinimumQuantity: 6 }, // quantity price
 ];
 
 function fakeUnleashed(data: { products: unknown[]; customers: unknown[]; prices: unknown[] }) {
@@ -81,7 +82,19 @@ test("mapProductPrice: fixed, discount, dates, and non-customer lines", () => {
   assert.equal(disc.type, "discount");
   assert.equal(disc.groupName, "Mops");
   assert.equal(disc.validFrom, "2025-11-25");
+  assert.equal(disc.value, 25);
   assert.equal(mapProductPrice(uPrices[2] as never), null);
+});
+
+test("mapProductPrice: real sandbox discount line (DiscountValue is a fraction)", () => {
+  const r = mapProductPrice({
+    Guid: "s1", Customer: { CustomerCode: "C1" }, Product: { ProductCode: "P1" }, PriceType: "Discount %",
+    DiscountValue: 0.1, CustomerPrice: 2.835, DefaultSellPrice: 3.15, MinimumQuantity: 50,
+  } as never)!;
+  assert.equal(r.type, "discount");
+  assert.equal(r.value, 10);
+  assert.equal(r.minQty, 50);
+  assert.equal(r.unleashedCustomerPrice, 2.835);
 });
 
 test("full sync then price a cart end to end", async () => {
@@ -91,6 +104,7 @@ test("full sync then price a cart end to end", async () => {
   assert.equal(result.products, 3);
   assert.equal(result.customers, 3);
   assert.equal(result.rules, 2);
+  assert.equal(result.quantityPrices, 1);
   assert.equal(result.skippedRules, 1);
 
   const at = new Date("2026-11-25T01:00:00Z");
@@ -98,6 +112,7 @@ test("full sync then price a cart end to end", async () => {
     { sku: "BLADE350", quantity: 2 },
     { sku: "MOP01", quantity: 12 },
     { sku: "MOP01", quantity: 3 },
+    { sku: "MOP01", quantity: 6 },
     { sku: "OLD01", quantity: 1 },
     { sku: "NOPE", quantity: 1 },
   ], { at });
@@ -105,8 +120,9 @@ test("full sync then price a cart end to end", async () => {
     ["BLADE350", 199, "customer-product"],
     ["MOP01", 15, "customer-group"],
     ["MOP01", 20, "default"],
+    ["MOP01", 17, "quantity"],
   ]);
-  assert.equal(serco.goodsExGst, 398 + 180 + 60);
+  assert.equal(serco.goodsExGst, 398 + 180 + 60 + 102);
   assert.deepEqual(serco.errors.map((e) => e.sku), ["OLD01", "NOPE"]);
 
   const asset = await priceLines(store, "ASSETLINK", [{ sku: "BLADE350", quantity: 1 }], { at });
@@ -150,4 +166,20 @@ test("FileStore persists between runs", async () => {
   const b = await FileStore.open(path);
   assert.equal((await b.getState()).counts.rules, 2);
   assert.ok((await b.getState()).lastFullSyncAt);
+});
+
+test("mapQuantityPrice: product line with no customer", () => {
+  const q = mapQuantityPrice({ Guid: "q", Product: { ProductCode: "P1" }, PriceType: "Discount %", DiscountValue: 0.15,
+    CustomerPrice: 25.5, DefaultSellPrice: 30, MinimumQuantity: 48 } as never)!;
+  assert.deepEqual([q.type, q.value, q.minQty, q.unleashedPrice], ["discount", 15, 48, 25.5]);
+  assert.equal(mapQuantityPrice({ Guid: "c", Customer: { CustomerCode: "C" }, Product: { ProductCode: "P1" }, CustomerPrice: 1 } as never), null);
+});
+
+test("FileStore opens a snapshot saved before quantity prices existed", async () => {
+  const { writeFile } = await import("node:fs/promises");
+  const path = join(await mkdtemp(join(tmpdir(), "ccb2b-")), "old.json");
+  await writeFile(path, JSON.stringify({ products: {}, customers: {}, rules: {}, state: { lastFullSyncAt: "2026-11-25T00:00:00Z", lastChangeSyncAt: null, counts: {} } }));
+  const s = await FileStore.open(path);
+  assert.deepEqual(await s.getQuantityPrices("X"), []);
+  assert.equal((await s.getState()).counts.quantityPrices, 0);
 });

@@ -21,21 +21,21 @@ Upload this file to the new Claude project, then start a chat with:
 2. Settings → Connectors: connect GitHub with an account that has Write access to the repo above.
 3. In the new chat, provide:
    - the Dev Dashboard app's Client ID and Client Secret (dev store only);
-   - a **newly regenerated** Unleashed sandbox API ID and key (the old key was pasted in the previous chat).
+   - the Unleashed sandbox API ID and key go in `.env` only (Unleashed keys can't be regenerated; never paste the live key into a chat).
 
 ## Open questions
 - Do store prices include GST?
 - Does the Unleashed Shopify app import draft-originated B2B orders with the right site and prices? Test this first.
-- Do Unleashed Quantity Prices need supporting in phase 1?
+- Quantity Prices: supported; confirm against 1-CT-0014 in the sandbox.
 - Hosting account (Fly.io or Render) and email sender domain.
 - Approximate SKU count.
 
 ## Next steps
 Phase 1 code is written and unit-tested (35 tests, see README.md): Unleashed client, nightly full sync + daytime changes sync, pricing engine, cart pricing.
-Still to do for phase 1:
-1. Push this code to the repo.
-2. Regenerate the Unleashed sandbox key, put it in `.env`, run `npm run sandbox:check`, and do the four checks in README.md ("Sandbox checks").
-3. Fix anything those checks show (most likely `UNLEASHED_DISCOUNT_RATE_FORMAT`).
+Done 25 Nov: code pushed to the repo; sandbox check passed (auth OK; 9,023 products, 2,832 customers, 4,307 customer price lines).
+Confirmed: Customer.DiscountRate is a fraction (0.02 = 2%); ProductPrices DiscountValue is a fraction too (0.1 = 10%), fixed in the mapper.
+Quantity Prices added (product lines with no customer in /ProductPrices); quick check: `npm run price -- CUST SKU QTY...`.
+Still to do for phase 1: compare 5–10 prices from `npm run sandbox:check -- CUSTCODE SKU QTY` with real Unleashed sales orders (README, "Sandbox checks").
 Then phase 2: scaffold the Shopify app (Shopify CLI, React Router), move storage to Postgres (prisma/schema.prisma), import companies/sites and link them to Unleashed customer codes.
 
 ---

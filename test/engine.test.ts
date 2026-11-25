@@ -114,7 +114,8 @@ test("customer pricing is not further reduced by the customer discount", () => {
 });
 
 test("quantity prices sit between customer pricing and tier", () => {
-  const qp = [{ productCode: "BLADE350", minQty: 5, price: 255 }, { productCode: "BLADE350", minQty: 20, price: 245 }];
+  const q = (minQty: number, value: number) => ({ id: `q${minQty}`, productCode: "BLADE350", type: "fixed" as const, value, unleashedPrice: null, minQty, validFrom: null, validTo: null });
+  const qp = [q(5, 255), q(20, 245)];
   assert.equal(resolvePrice({ product: product(), customer: customer(), quantity: 4, rules: [], quantityPrices: qp, at }).source, "tier");
   assert.equal(resolvePrice({ product: product(), customer: customer(), quantity: 25, rules: [], quantityPrices: qp, at }).unitExGst, 245);
   assert.equal(resolvePrice({ product: product(), customer: customer(), quantity: 25, rules: [rule()], quantityPrices: qp, at }).unitExGst, 199);
@@ -141,4 +142,16 @@ test("money: 4-decimal prices and half-up rounding", () => {
   assert.equal(roundCents(1.005), 1.01);
   assert.equal(applyDiscount(19.9999, 0.125), 17.4999);
   assert.equal(roundCents(applyDiscount(0.1 + 0.2, 0)), 0.3);
+});
+
+test("quantity price beats tier, respects dates, and %-off works from default price", () => {
+  const base = { productCode: "BLADE350", unleashedPrice: null, validFrom: null, validTo: null };
+  const disc = [{ ...base, id: "d", type: "discount" as const, value: 20, minQty: 10 }];
+  const r = resolvePrice({ product: product(), customer: customer(), quantity: 10, rules: [], quantityPrices: disc, at });
+  assert.equal(r.source, "quantity");
+  assert.equal(r.unitExGst, 240); // 20% off default 300, even though tier 2 is 260
+  const expired = [{ ...base, id: "x", type: "fixed" as const, value: 100, minQty: 0, validTo: "2026-11-24" }];
+  assert.equal(resolvePrice({ product: product(), customer: customer(), quantity: 1, rules: [], quantityPrices: expired, at }).source, "tier");
+  const withUnleashed = [{ ...base, id: "u", type: "discount" as const, value: 10, unleashedPrice: 31.5, minQty: 0 }];
+  assert.equal(resolvePrice({ product: product(), customer: customer(), quantity: 1, rules: [], quantityPrices: withUnleashed, at }).unitExGst, 31.5);
 });

@@ -49,6 +49,20 @@ model CustomerPriceRule {
   @@index([customerCode])
 }
 
+model ProductQuantityPrice {
+  id            String   @id // Unleashed ProductPrice Guid
+  productCode   String
+  type          String // "fixed" | "discount"
+  value         Decimal  @db.Decimal(14, 4)
+  unleashedPrice Decimal? @db.Decimal(14, 4)
+  minQty        Decimal  @default(0) @db.Decimal(14, 4)
+  validFrom     String?
+  validTo       String?
+  syncedAt      DateTime @updatedAt
+
+  @@index([productCode])
+}
+
 model SyncState {
   id               Int       @id @default(1)
   lastFullSyncAt   DateTime?

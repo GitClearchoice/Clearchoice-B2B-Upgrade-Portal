@@ -11,7 +11,7 @@ const log = (m: string) => console.log(`[${new Date().toISOString()}] ${m}`);
 const run = process.argv.includes("--changes") ? changesSync : fullSync;
 try {
   const result = await run(client, store, { discountFormat, log });
-  log(`Done (${result.mode}): ${result.products} products, ${result.customers} customers, ${result.rules} price lines.`);
+  log(`Done (${result.mode}): ${result.products} products, ${result.customers} customers, ${result.rules} customer price lines, ${result.quantityPrices} quantity prices.`);
   for (const w of result.warnings) log(`WARNING ${w}`);
 } catch (e) {
   log(`Sync failed: ${(e as Error).message}`);

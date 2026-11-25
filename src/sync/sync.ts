@@ -1,7 +1,7 @@
 import type { UnleashedClient } from "../unleashed/client.ts";
 import { sydneyDate } from "../pricing/engine.ts";
-import type { CustomerPriceRule } from "../pricing/types.ts";
-import { type DiscountRateFormat, mapCustomer, mapProduct, mapProductPrice } from "./mappers.ts";
+import type { CustomerPriceRule, QuantityPrice } from "../pricing/types.ts";
+import { type DiscountRateFormat, mapCustomer, mapProduct, mapProductPrice, mapQuantityPrice } from "./mappers.ts";
 import type { PriceStore } from "./store.ts";
 
 export interface SyncOptions {
@@ -15,6 +15,7 @@ export interface SyncResult {
   products: number;
   customers: number;
   rules: number;
+  quantityPrices: number;
   skippedRules: number;
   warnings: string[];
   startedAt: string;
@@ -46,16 +47,16 @@ export async function fullSync(client: UnleashedClient, store: PriceStore, opts:
     }
   }
   log(`  ${customers.length} customers`);
-  log("Fetching customer pricing…");
-  const { rules, skipped } = mapRules(await client.productPrices());
-  log(`  ${rules.length} customer price lines (${skipped} skipped)`);
+  log("Fetching customer pricing and quantity prices…");
+  const { rules, quantityPrices, skipped } = mapRules(await client.productPrices());
+  log(`  ${rules.length} customer price lines, ${quantityPrices.length} quantity prices (${skipped} skipped)`);
 
   warnings.push(...checkReferences(rules, new Set(products.map((p) => p.code)), new Set(customers.map((c) => c.code))));
 
-  await store.replaceAll({ products, customers, rules });
+  await store.replaceAll({ products, customers, rules, quantityPrices });
   const finishedAt = (opts.now?.() ?? new Date()).toISOString();
   await store.setState({ lastFullSyncAt: finishedAt, lastChangeSyncAt: finishedAt });
-  return { mode: "full", products: products.length, customers: customers.length, rules: rules.length, skippedRules: skipped, warnings, startedAt, finishedAt };
+  return { mode: "full", products: products.length, customers: customers.length, rules: rules.length, quantityPrices: quantityPrices.length, skippedRules: skipped, warnings, startedAt, finishedAt };
 }
 
 /**
@@ -83,26 +84,34 @@ export async function changesSync(client: UnleashedClient, store: PriceStore, op
       warnings.push((e as Error).message);
     }
   }
-  const { rules, skipped } = mapRules(await client.productPrices({ modifiedSince }));
+  const { rules, quantityPrices, skipped } = mapRules(await client.productPrices({ modifiedSince }));
 
   await store.upsertProducts(products);
   await store.upsertCustomers(customers);
   await store.upsertRules(rules);
+  await store.upsertQuantityPrices(quantityPrices);
   const finishedAt = (opts.now?.() ?? new Date()).toISOString();
   await store.setState({ lastChangeSyncAt: finishedAt });
   log(`  ${products.length} products, ${customers.length} customers, ${rules.length} price lines updated`);
-  return { mode: "changes", products: products.length, customers: customers.length, rules: rules.length, skippedRules: skipped, warnings, startedAt, finishedAt };
+  return { mode: "changes", products: products.length, customers: customers.length, rules: rules.length, quantityPrices: quantityPrices.length, skippedRules: skipped, warnings, startedAt, finishedAt };
 }
 
-function mapRules(raw: Parameters<typeof mapProductPrice>[0][]): { rules: CustomerPriceRule[]; skipped: number } {
+function mapRules(raw: Parameters<typeof mapProductPrice>[0][]): {
+  rules: CustomerPriceRule[];
+  quantityPrices: QuantityPrice[];
+  skipped: number;
+} {
   const rules: CustomerPriceRule[] = [];
+  const quantityPrices: QuantityPrice[] = [];
   let skipped = 0;
   for (const pp of raw) {
     const r = mapProductPrice(pp);
-    if (r) rules.push(r);
-    else skipped++;
+    if (r) { rules.push(r); continue; }
+    const q = mapQuantityPrice(pp);
+    if (q) { quantityPrices.push(q); continue; }
+    skipped++;
   }
-  return { rules, skipped };
+  return { rules, quantityPrices, skipped };
 }
 
 function checkReferences(rules: CustomerPriceRule[], productCodes: Set<string>, customerCodes: Set<string>): string[] {

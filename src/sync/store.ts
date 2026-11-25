@@ -1,22 +1,31 @@
 import { mkdir, readFile, rename, writeFile } from "node:fs/promises";
 import { dirname } from "node:path";
-import type { Customer, CustomerPriceRule, Product } from "../pricing/types.ts";
+import type { Customer, CustomerPriceRule, Product, QuantityPrice } from "../pricing/types.ts";
 
 export interface SyncState {
   lastFullSyncAt: string | null;
   lastChangeSyncAt: string | null;
-  counts: { products: number; customers: number; rules: number };
+  counts: { products: number; customers: number; rules: number; quantityPrices: number };
 }
 
 /**
  * Where synced Unleashed data lives. The standalone scripts use FileStore; the Shopify app
  * (phase 2+) will implement this interface on Postgres (see prisma/schema.prisma).
  */
+export interface SyncData {
+  products: Product[];
+  customers: Customer[];
+  rules: CustomerPriceRule[];
+  quantityPrices: QuantityPrice[];
+}
+
 export interface PriceStore {
-  replaceAll(data: { products: Product[]; customers: Customer[]; rules: CustomerPriceRule[] }): Promise<void>;
+  replaceAll(data: SyncData): Promise<void>;
   upsertProducts(products: Product[]): Promise<void>;
   upsertCustomers(customers: Customer[]): Promise<void>;
   upsertRules(rules: CustomerPriceRule[]): Promise<void>;
+  upsertQuantityPrices(prices: QuantityPrice[]): Promise<void>;
+  getQuantityPrices(productCode: string): Promise<QuantityPrice[]>;
   getProduct(code: string): Promise<Product | undefined>;
   getCustomer(code: string): Promise<Customer | undefined>;
   getRulesForCustomer(code: string): Promise<CustomerPriceRule[]>;
@@ -28,22 +37,24 @@ interface Snapshot {
   products: Record<string, Product>;
   customers: Record<string, Customer>;
   rules: Record<string, CustomerPriceRule>;
+  quantityPrices: Record<string, QuantityPrice>;
   state: SyncState;
 }
 
 const emptyState = (): SyncState => ({
   lastFullSyncAt: null,
   lastChangeSyncAt: null,
-  counts: { products: 0, customers: 0, rules: 0 },
+  counts: { products: 0, customers: 0, rules: 0, quantityPrices: 0 },
 });
 
 export class MemoryStore implements PriceStore {
-  protected snap: Snapshot = { products: {}, customers: {}, rules: {}, state: emptyState() };
+  protected snap: Snapshot = { products: {}, customers: {}, rules: {}, quantityPrices: {}, state: emptyState() };
 
-  async replaceAll(data: { products: Product[]; customers: Customer[]; rules: CustomerPriceRule[] }) {
+  async replaceAll(data: SyncData) {
     this.snap.products = Object.fromEntries(data.products.map((p) => [p.code, p]));
     this.snap.customers = Object.fromEntries(data.customers.map((c) => [c.code, c]));
     this.snap.rules = Object.fromEntries(data.rules.map((r) => [r.id, r]));
+    this.snap.quantityPrices = Object.fromEntries(data.quantityPrices.map((q) => [q.id, q]));
     await this.persist();
   }
   async upsertProducts(products: Product[]) {
@@ -57,6 +68,13 @@ export class MemoryStore implements PriceStore {
   async upsertRules(rules: CustomerPriceRule[]) {
     for (const r of rules) this.snap.rules[r.id] = r;
     await this.persist();
+  }
+  async upsertQuantityPrices(prices: QuantityPrice[]) {
+    for (const q of prices) this.snap.quantityPrices[q.id] = q;
+    await this.persist();
+  }
+  async getQuantityPrices(productCode: string) {
+    return Object.values(this.snap.quantityPrices).filter((q) => q.productCode === productCode);
   }
   async getProduct(code: string) {
     return this.snap.products[code];
@@ -74,6 +92,7 @@ export class MemoryStore implements PriceStore {
         products: Object.keys(this.snap.products).length,
         customers: Object.keys(this.snap.customers).length,
         rules: Object.keys(this.snap.rules).length,
+        quantityPrices: Object.keys(this.snap.quantityPrices).length,
       },
     };
   }
@@ -94,7 +113,8 @@ export class FileStore extends MemoryStore {
   static async open(path: string): Promise<FileStore> {
     const store = new FileStore(path);
     try {
-      store.snap = JSON.parse(await readFile(path, "utf8"));
+      const loaded = JSON.parse(await readFile(path, "utf8"));
+      store.snap = { ...store.snap, ...loaded, quantityPrices: loaded.quantityPrices ?? {} };
     } catch (e) {
       if ((e as NodeJS.ErrnoException).code !== "ENOENT") throw e;
     }

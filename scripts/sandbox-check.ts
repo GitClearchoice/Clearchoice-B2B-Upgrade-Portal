@@ -24,6 +24,15 @@ console.log(
 const prices = await client.productPrices();
 const types = [...new Set(prices.map((p) => p.PriceType))];
 console.log(`   ${prices.length} customer price lines; price types seen: ${types.join(", ") || "(none)"}`);
+const qtyLines = prices.filter((p) => !p.Customer?.CustomerCode && p.Product?.ProductCode);
+console.log(`   ${qtyLines.length} of them have a product but no customer (product Quantity Prices).`);
+if (qtyLines[0]) {
+  const q = qtyLines[0];
+  console.log("   Quantity Price sample:", JSON.stringify({
+    ProductCode: q.Product?.ProductCode, PriceType: q.PriceType, DiscountValue: q.DiscountValue,
+    CustomerPrice: q.CustomerPrice, DefaultSellPrice: q.DefaultSellPrice, MinimumQuantity: q.MinimumQuantity,
+  }));
+}
 const sample = prices.find((p) => /discount/i.test(p.PriceType ?? ""));
 if (sample) {
   console.log("   Discount-% line sample:", JSON.stringify({
@@ -36,6 +45,7 @@ console.log("3. Full sync into", snapshotPath, "…");
 const store = await FileStore.open(snapshotPath);
 const result = await fullSync(client, store, { discountFormat, log: (m) => console.log("  ", m) });
 for (const w of result.warnings.slice(0, 10)) console.log("   WARNING", w);
+console.log(`   Done: ${result.products} products, ${result.customers} customers, ${result.rules} customer price lines, ${result.quantityPrices} quantity prices, ${result.warnings.length} warnings.`);
 
 const [customerCode, sku, qty] = process.argv.slice(2);
 if (customerCode && sku) {

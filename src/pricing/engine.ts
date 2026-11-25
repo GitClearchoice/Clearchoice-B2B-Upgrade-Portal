@@ -16,7 +16,7 @@ export interface PriceInput {
   quantity: number;
   /** This customer's Customer Pricing lines (other customers' lines are ignored). */
   rules: CustomerPriceRule[];
-  /** Quantity price breaks; pass [] until phase 1's open question is settled. */
+  /** This product's Quantity Prices (apply to all customers). */
   quantityPrices?: QuantityPrice[];
   /** Pricing date. Defaults to now. Rules are compared on the Sydney calendar date. */
   at?: Date;
@@ -112,12 +112,26 @@ export function resolvePrice(input: PriceInput): ResolvedPrice {
   }
 
   // 2. Quantity Prices
+  const qpPrice = (q: QuantityPrice): number => {
+    if (q.unleashedPrice != null && q.unleashedPrice > 0) return q.unleashedPrice;
+    if (q.type === "fixed") return q.value;
+    if (product.defaultSellPrice == null) return Number.POSITIVE_INFINITY;
+    return applyDiscount(product.defaultSellPrice, q.value / 100);
+  };
   const breaks = (input.quantityPrices ?? []).filter(
-    (q) => q.productCode === product.code && quantity >= q.minQty,
+    (q) =>
+      q.productCode === product.code &&
+      quantity >= q.minQty &&
+      (!q.validFrom || today >= q.validFrom) &&
+      (!q.validTo || today <= q.validTo),
   );
   if (breaks.length) {
-    const qp = breaks.sort((a, b) => b.minQty - a.minQty)[0];
-    return finish(qp.price, "quantity", `Quantity price (min qty ${qp.minQty})`);
+    const qp = breaks.sort((a, b) => b.minQty - a.minQty || qpPrice(a) - qpPrice(b))[0];
+    const price = qpPrice(qp);
+    if (Number.isFinite(price)) {
+      const what = qp.type === "fixed" ? `fixed $${qp.value}` : `${qp.value}% off default`;
+      return finish(price, "quantity", `Quantity Price (${what}, min qty ${qp.minQty})`, qp.id);
+    }
   }
 
   // 3. Sell Price Tier less discount
