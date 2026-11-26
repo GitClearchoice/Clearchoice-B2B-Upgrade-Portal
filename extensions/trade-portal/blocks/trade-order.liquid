@@ -1,0 +1,50 @@
+{%- comment -%}
+  Cart page: trade prices for every line, PO number, delivery note and "Place order".
+  The order goes to the app (/apps/b2b/orders), which prices it again on the server.
+{%- endcomment -%}
+{%- if customer and customer.b2b? -%}
+  <div
+    class="cc-trade-order"
+    data-cc-trade-order
+    data-proxy="/apps/b2b"
+    data-location="{{ customer.current_location.id }}"
+    data-po-required="{{ block.settings.po_required }}"
+    {{ block.shopify_attributes }}
+  >
+    <h2 class="cc-trade-order__heading">{{ block.settings.heading }}</h2>
+    <p class="cc-trade-order__site">
+      Delivering to <strong>{{ customer.current_location.name }}</strong>
+      {%- if customer.current_company %} ({{ customer.current_company.name }}){% endif -%}
+    </p>
+    <div data-cc-lines><p>Loading your prices…</p></div>
+    <form class="cc-trade-order__form" data-cc-form novalidate>
+      <label>
+        PO number{% if block.settings.po_required %} *{% endif %}
+        <input type="text" name="poNumber" maxlength="100" autocomplete="off" {% if block.settings.po_required %}required{% endif %}>
+      </label>
+      <label>
+        Delivery note (optional)
+        <textarea name="note" maxlength="500" rows="3"></textarea>
+      </label>
+      <p class="cc-trade-order__error" data-cc-error role="alert" hidden></p>
+      <button type="submit" class="button button--primary" data-cc-submit disabled>Place order</button>
+      <p class="cc-trade-order__terms">{{ block.settings.terms }}</p>
+    </form>
+    <div class="cc-trade-order__done" data-cc-done hidden></div>
+  </div>
+  <script src="{{ 'trade-portal.js' | asset_url }}" defer></script>
+  {{ 'trade-portal.css' | asset_url | stylesheet_tag }}
+{%- endif -%}
+
+{% schema %}
+{
+  "name": "Trade order",
+  "target": "section",
+  "enabled_on": { "templates": ["cart"] },
+  "settings": [
+    { "type": "text", "id": "heading", "label": "Heading", "default": "Place your trade order" },
+    { "type": "checkbox", "id": "po_required", "label": "PO number required", "default": true },
+    { "type": "text", "id": "terms", "label": "Note under the button", "default": "Prices are ex GST. Your order is charged to your account and invoiced on your usual terms." }
+  ]
+}
+{% endschema %}

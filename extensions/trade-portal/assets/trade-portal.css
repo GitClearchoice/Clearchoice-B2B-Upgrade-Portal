@@ -1,0 +1,16 @@
+.cc-trade-price { margin: 0.75rem 0; padding: 0.75rem 1rem; border: 1px solid rgba(0,0,0,.12); border-radius: 6px; }
+.cc-trade-price__label { font-size: .85em; opacity: .75; }
+.cc-trade-price__value { font-size: 1.4em; font-weight: 600; }
+.cc-trade-price__value small { font-size: .6em; font-weight: 400; opacity: .75; }
+.cc-trade-price__site { font-size: .8em; opacity: .65; margin-top: .25rem; }
+.cc-trade-order { margin: 2rem 0; }
+.cc-trade-order table { width: 100%; border-collapse: collapse; margin: 1rem 0; }
+.cc-trade-order th, .cc-trade-order td { padding: .5rem; border-bottom: 1px solid rgba(0,0,0,.08); text-align: left; }
+.cc-trade-order td.num, .cc-trade-order th.num { text-align: right; white-space: nowrap; }
+.cc-trade-order tfoot td { font-weight: 600; border-bottom: 0; }
+.cc-trade-order__form { display: grid; gap: .75rem; max-width: 32rem; }
+.cc-trade-order__form label { display: grid; gap: .25rem; }
+.cc-trade-order__form input, .cc-trade-order__form textarea { padding: .5rem; font: inherit; }
+.cc-trade-order__error { color: #b00020; }
+.cc-trade-order__terms { font-size: .85em; opacity: .7; }
+.cc-trade-order__line-error { color: #b00020; font-size: .85em; }

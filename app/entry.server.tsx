@@ -5,6 +5,10 @@ import { createReadableStreamFromReadable } from "@react-router/node";
 import { type EntryContext } from "react-router";
 import { isbot } from "isbot";
 import { addDocumentResponseHeaders } from "./shopify.server";
+import { startOrderRetryLoop } from "./orders.server";
+
+// Retries trade orders that didn't reach Unleashed (every 5 minutes).
+startOrderRetryLoop();
 
 export const streamTimeout = 5000;
 

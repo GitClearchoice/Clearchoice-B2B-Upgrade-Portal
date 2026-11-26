@@ -1,4 +1,4 @@
-# Clearchoice B2B Portal — Handover (updated 27 Nov 2026, phase 3 app scaffolded)
+# Clearchoice B2B Portal — Handover (updated 27 Nov 2026, phase 3 Place order written)
 
 Upload this file to the new Claude project, then start a chat with:
 "Read clearchoice-b2b-handover.md and continue from 'Next steps'."
@@ -47,14 +47,21 @@ Upload this file to the new Claude project, then start a chat with:
 
 **Phase 3, step 1 — done (26 Nov).** `npm run order:test` sent a Parked test order for Assetlink (Westpoint Blacktown) straight to the Unleashed sandbox: it landed under the right customer. Corrections: tax code OUTPUT ("GST on Income (10%)"), City left blank. Re-tested 26 Nov: customer, delivery name and address, Customer Reference (PO), prices, GST and warehouse all confirmed correct in Unleashed.
 
-**Phase 3, step 2 — app scaffolded (27 Nov), not yet run against Shopify/Render.** The repo root is now the Shopify app (React Router template) as well as the engine (`src/`). Added: Postgres schema + first migration (sessions + pricing), `PrismaStore` (sync writes to Postgres when `DATABASE_URL` is set), buyer → site → Unleashed code resolution (`src/b2b/buyer.ts`), storefront price endpoint `GET /apps/b2b/prices` (app proxy), staff home page (sync status + price check), `render.yaml` (web + Postgres + nightly cron, Singapore). `shopify.app.toml` uses the existing Dev Dashboard app (client ID 4b83…) and keeps the import scopes.
+**Phase 3, step 2 — app live on Render (27 Nov).** https://clearchoice-b2b.onrender.com, installed on the dev store, sync cron filled Postgres (home page shows the counts). The repo root is the Shopify app (React Router template) as well as the engine (`src/`): Postgres (sessions, pricing), `PrismaStore`, buyer → site → Unleashed code (`src/b2b/buyer.ts`), `GET /apps/b2b/prices`, staff home page (sync status + price check), `render.yaml` (web + Postgres + nightly cron, Singapore). `shopify.app.toml` uses the existing Dev Dashboard app (client ID 4b83…) and keeps the import scopes plus `write_app_proxy`.
+
+**Phase 3, step 3 — "Place order" code written (27 Nov), not yet tested on the store.**
+- `src/orders/placeOrder.ts`: site + SKUs read from Shopify (never the browser) → server prices → TradeOrder row with the Unleashed Guid saved first → draft order (company/location/contact, priceOverride ex GST, PO, note, tag `trade-order`, never completed) → `POST /SalesOrders/{guid}` → tags `sent-to-unleashed` + `unleashed-SO-…`, or `unleashed-failed`. Same `requestKey` twice returns the first order. If the draft fails, nothing is kept and the buyer can retry.
+- Retries: every 5 min in the web process (`app/orders.server.ts`), up to 10 attempts; each retry first asks Unleashed whether the Guid already exists, so a lost reply can't create a duplicate. Staff emails on failure come with phase 4 (email service).
+- `POST /apps/b2b/orders` (JSON only, so a cross-site form can't place an order). Migration `20261127010000_trade_orders` runs on deploy.
+- Theme app extension `extensions/trade-portal`: **Trade price** block (product page: price for the selected variant and quantity, ex and inc GST), **Trade order** block (cart page: lines with trade prices, subtotal/GST/total, PO number, delivery note, Place order; re-prices if the cart changed, clears the cart after), **Trade portal** app embed (hides checkout and express-checkout buttons for trade buyers). Uses the buyer's current site from Shopify's own B2B location selector (`customer.current_location`). Retail customers see nothing.
+- No budget check yet: every order is sent (budgets/approvals are phase 4).
 
 **Phase 3 next:**
-1. You: copy the live theme (Online Store → Themes → … → Download theme file, upload to the dev store) and export a few hundred products from the live admin as CSV and import them into the dev store (SKUs = Unleashed codes).
-2. You: on Render, New → Blueprint → this repo. Enter the Unleashed sandbox ID/key and the Shopify Client ID/Secret (`SHOPIFY_API_KEY` / `SHOPIFY_API_SECRET`); set `SHOPIFY_APP_URL` to the web service URL, and put that URL in `shopify.app.toml` (`application_url`, redirect URL, app proxy URL).
-3. Run `npm run shopify app deploy` (or `npm run dev` for a tunnel) so Shopify picks up the new scopes and app proxy; approve the scope update on the dev store. Shopify requires `write_app_proxy` for apps with an app proxy (added to `shopify.app.toml` and `render.yaml` SCOPES, 26 Nov).
-4. Trigger the sync cron once on Render, check the app's home page shows ~9,000 products, and price-check a few known cases.
-5. Next code: theme app extension (prices on product/collection/cart pages via `/apps/b2b/prices`, site picker), then "Place order" (draft order + send to Unleashed, using `src/unleashed/salesOrder.ts`) with a TradeOrder table for the Guid/idempotency.
+1. You: copy the live theme and a few hundred products into the dev store (SKUs = Unleashed codes), if not done yet.
+2. You: `npm run deploy` in your own terminal (releases the theme extension). In the dev store theme editor: App embeds → turn on **Trade portal**; product template → add block **Trade price**; cart template → add block **Trade order**.
+3. Test buyer: in Shopify admin, add a contact with your own email to Assetlink (Ordering only, on 2–3 sites); log in on the storefront as that contact. Don't use a real customer's email.
+4. Check: product page price matches the app's price check; cart shows trade prices; Place order → draft order in Shopify (tags, PO, prices) and a Parked sales order in the Unleashed sandbox (customer, delivery name/address, Customer Reference, prices, GST, instructions). Then delete the test orders.
+5. Collection pages: product cards are theme code, so trade prices there need a small theme edit (to do once the live theme is in the dev store). The theme's own prices also need hiding for trade buyers.
 
 ---
 

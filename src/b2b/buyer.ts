@@ -9,6 +9,7 @@ export const BUYER_QUERY = `#graphql
       displayName
       email: defaultEmailAddress { emailAddress }
       companyContactProfiles {
+        id
         company {
           id
           name
@@ -33,6 +34,7 @@ export interface BuyerQueryData {
     displayName: string;
     email: { emailAddress: string } | null;
     companyContactProfiles: {
+      id: string;
       company: { id: string; name: string; code: { value: string } | null };
       roleAssignments: {
         nodes: { companyLocation: { id: string; name: string; code: { value: string } | null } | null }[];
@@ -51,6 +53,8 @@ export interface BuyerContext {
   customerId: string;
   name: string;
   email: string | null;
+  /** CompanyContact GID (draft orders need it). */
+  contactId: string;
   companyId: string;
   companyName: string;
   sites: BuyerSite[];
@@ -97,6 +101,7 @@ export function buyerContext(data: BuyerQueryData, locationId?: string | null): 
     customerId: c.id,
     name: c.displayName,
     email: c.email?.emailAddress ?? null,
+    contactId: profile.id,
     companyId: profile.company.id,
     companyName: profile.company.name,
     sites,

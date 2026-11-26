@@ -11,7 +11,7 @@ const data = (companyCode: string | null, nodes: ReturnType<typeof loc>[]): Buye
     displayName: "Pat Buyer",
     email: { emailAddress: "pat@example.com" },
     companyContactProfiles: [
-      { company: { id: "gid://shopify/Company/9", name: "Acme", code: companyCode ? { value: companyCode } : null }, roleAssignments: { nodes } },
+      { id: "gid://shopify/CompanyContact/5", company: { id: "gid://shopify/Company/9", name: "Acme", code: companyCode ? { value: companyCode } : null }, roleAssignments: { nodes } },
     ],
   },
 });

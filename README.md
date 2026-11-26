@@ -81,13 +81,24 @@ npm run sync                  # fills Postgres from the Unleashed sandbox
 npm run dev                   # shopify app dev: tunnel + installs on the dev store
 ```
 
+## Phase 3, step 3: "Place order" and the theme extension
+
+| Part | File | What it does |
+|---|---|---|
+| Order flow | `src/orders/placeOrder.ts` | Server prices → TradeOrder row (Guid first) → Shopify draft order (never completed) → Unleashed sales order; idempotent on `requestKey`; retry checks Unleashed for the Guid first |
+| DB + retries | `app/orders.server.ts` | Prisma repo for `TradeOrder`; retry loop every 5 minutes (`ORDER_RETRY_DISABLED=1` turns it off) |
+| Order endpoint | `app/routes/proxy.orders.tsx` | `POST /apps/b2b/orders` (JSON) `{ requestKey, location, poNumber, note, lines: [{ variantId, quantity }] }` |
+| Theme extension | `extensions/trade-portal` | Blocks **Trade price** (product), **Trade order** (cart), app embed **Trade portal** (hides checkout buttons for trade buyers) |
+
+Settings (web service env): `UNLEASHED_ORDER_STATUS` (Parked), `UNLEASHED_WAREHOUSE` (Clearchoice Factory), `UNLEASHED_TAX_CODE` (OUTPUT).
+
 ## Running it
 
 Needs Node 22.18 or later. No runtime dependencies.
 
 ```bash
 cp .env.example .env          # add the NEW sandbox API ID and key
-npm test                      # 80 tests, no network needed
+npm test                      # 86 tests, no network needed
 npm run sandbox:check         # checks auth, shows field formats, does a full sync
 npm run sandbox:check -- CUSTCODE SKU 5   # prices one line; compare with an Unleashed sales order
 npm run price -- CUSTCODE SKU 1 48 50   # quick: prices from the last sync, no Unleashed calls

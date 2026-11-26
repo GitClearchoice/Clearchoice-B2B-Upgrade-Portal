@@ -91,3 +91,35 @@ model SyncState {
   lastChangeSyncAt DateTime?
   lastError        String?
 }
+
+// Trade orders placed through the portal. id = the Unleashed SalesOrder Guid, saved before sending.
+model TradeOrder {
+  id                   String   @id
+  shop                 String
+  requestKey           String // from the order form; stops double submits
+  customerId           String
+  buyerName            String
+  buyerEmail           String?
+  companyId            String
+  locationId           String
+  siteName             String
+  customerCode         String // exact Unleashed customer code
+  poNumber             String
+  note                 String?
+  goodsExGst           Decimal  @db.Decimal(14, 2)
+  lines                Json
+  draftOrderId         String?
+  draftOrderName       String?
+  status               String // pending | sent | failed
+  unleashedOrderNumber String?
+  payload              Json? // the Unleashed sales order as sent
+  attempts             Int      @default(0)
+  lastError            String?
+  createdAt            DateTime @default(now())
+  updatedAt            DateTime @updatedAt
+
+  @@unique([shop, requestKey])
+  @@index([locationId, createdAt])
+  @@index([companyId, createdAt])
+  @@index([status])
+}

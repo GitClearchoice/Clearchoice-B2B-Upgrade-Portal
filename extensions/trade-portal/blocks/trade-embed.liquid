@@ -1,0 +1,29 @@
+{%- comment -%}
+  App embed: for trade buyers, hides the theme's own checkout and express-checkout buttons
+  (trade orders go through "Place order"). Locations are also set to submit orders as drafts,
+  as a safety net if a buyer reaches checkout anyway.
+{%- endcomment -%}
+{%- if customer and customer.b2b? -%}
+  <style>
+    {%- if block.settings.hide_checkout -%}
+    form[action*="/cart"] [name="checkout"],
+    form[action*="/cart"] button[type="submit"][name="checkout"],
+    a[href*="/checkout"],
+    .shopify-payment-button,
+    .additional-checkout-buttons,
+    shopify-accelerated-checkout,
+    shopify-accelerated-checkout-cart { display: none !important; }
+    {%- endif -%}
+  </style>
+  <script>document.documentElement.classList.add("cc-trade-buyer");</script>
+{%- endif -%}
+
+{% schema %}
+{
+  "name": "Trade portal",
+  "target": "body",
+  "settings": [
+    { "type": "checkbox", "id": "hide_checkout", "label": "Hide checkout buttons for trade buyers", "default": true }
+  ]
+}
+{% endschema %}
