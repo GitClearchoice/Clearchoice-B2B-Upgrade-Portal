@@ -52,7 +52,7 @@ Upload this file to the new Claude project, then start a chat with:
 **Phase 3 next:**
 1. You: copy the live theme (Online Store → Themes → … → Download theme file, upload to the dev store) and export a few hundred products from the live admin as CSV and import them into the dev store (SKUs = Unleashed codes).
 2. You: on Render, New → Blueprint → this repo. Enter the Unleashed sandbox ID/key and the Shopify Client ID/Secret (`SHOPIFY_API_KEY` / `SHOPIFY_API_SECRET`); set `SHOPIFY_APP_URL` to the web service URL, and put that URL in `shopify.app.toml` (`application_url`, redirect URL, app proxy URL).
-3. Run `npm run shopify app deploy` (or `npm run dev` for a tunnel) so Shopify picks up the new scopes and app proxy; approve the scope update on the dev store.
+3. Run `npm run shopify app deploy` (or `npm run dev` for a tunnel) so Shopify picks up the new scopes and app proxy; approve the scope update on the dev store. Shopify requires `write_app_proxy` for apps with an app proxy (added to `shopify.app.toml` and `render.yaml` SCOPES, 26 Nov).
 4. Trigger the sync cron once on Render, check the app's home page shows ~9,000 products, and price-check a few known cases.
 5. Next code: theme app extension (prices on product/collection/cart pages via `/apps/b2b/prices`, site picker), then "Place order" (draft order + send to Unleashed, using `src/unleashed/salesOrder.ts`) with a TradeOrder table for the Guid/idempotency.
 
