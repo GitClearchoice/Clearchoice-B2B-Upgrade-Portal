@@ -62,18 +62,22 @@ export function planCompany(customer: UCustomer, deliveryAddresses: UAddress[] |
   const sites: PlannedSite[] = [];
   const skippedSites: SkippedSite[] = [];
   const seen = new Set<string>();
+  let rebuiltCount = 0;
   for (const a of sources) {
     const nm = siteName(a);
-    const { address, problems } = toShopifyAddress(a, name);
+    const { address, problems, rebuilt, extraNote } = toShopifyAddress(a, name, nm);
     if (!address) { skippedSites.push({ name: nm, reason: problems.join(", "), address: a }); continue; }
+    if (rebuilt) rebuiltCount++;
     const externalId = siteExternalId(code, a);
     if (seen.has(externalId)) continue;
     seen.add(externalId);
     // Shopify location names must be unique within a company.
     let unique = nm;
     for (let i = 2; sites.some((s) => s.name === unique); i++) unique = `${nm} (${i})`;
-    sites.push({ externalId, name: unique, address, ...(a.DeliveryInstruction ? { note: a.DeliveryInstruction.trim() } : {}) });
+    const note = [a.DeliveryInstruction?.trim(), extraNote].filter(Boolean).join(" | ");
+    sites.push({ externalId, name: unique, address, ...(note ? { note } : {}) });
   }
+  if (rebuiltCount) notes.push(`${rebuiltCount} site address(es) rebuilt from details in the wrong fields; spot-check them in Shopify`);
   if (!sites.length) notes.push("no usable delivery address, so no company will be created");
 
   const email = (customer.Email ?? "").trim();

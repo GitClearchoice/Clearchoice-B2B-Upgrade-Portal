@@ -325,3 +325,40 @@ test("skipped sites are listed with their address and reasons are counted", asyn
   assert.ok(rows.some((r) => r[1] === "No street" && /no street address/.test(r[9])));
   assert.ok(reasonCounts([p]).some(([r]) => r === "no street address"));
 });
+
+test("rebuilds addresses typed into the wrong fields", () => {
+  const r = (a: Record<string, string>, name = "Site") => toShopifyAddress(a as never, undefined, name);
+  // state + postcode in City, suburb in Suburb, junk in Country
+  let x = r({ StreetAddress: "17 Example St", StreetAddress2: "Level 4", Suburb: "Blacktown", City: "NSW  2148", Region: "9999 0000", Country: "Level 4" });
+  assert.deepEqual([x.address?.address1, x.address?.city, x.address?.zoneCode, x.address?.zip], ["17 Example St", "Blacktown", "NSW", "2148"]);
+  assert.ok(x.rebuilt);
+  // "SUBURB, 1234" in Street 2
+  x = r({ StreetAddress: "14 Sample Road", StreetAddress2: "WEST RYDE, 2114", Suburb: "0400 000 000" });
+  assert.deepEqual([x.address?.city, x.address?.zip, x.address?.zoneCode], ["West Ryde", "2114", "NSW"]);
+  assert.match(x.extraNote!, /0400 000 000/);
+  // whole address in one comma-separated field
+  x = r({ StreetAddress: "Unit 2 8 Test Place, Prestons, NSW,  2170", StreetAddress2: "note" });
+  assert.deepEqual([x.address?.address1, x.address?.city, x.address?.zip], ["Unit 2 8 Test Place", "Prestons", "2170"]);
+  // street and locality in one field without commas
+  x = r({ StreetAddress: "Market Place", StreetAddress2: "197 Old Test Hwy Mittagong NSW 2575" });
+  assert.deepEqual([x.address?.address1, x.address?.city], ["197 Old Test Hwy", "Mittagong"]);
+  // street only in the site name
+  x = r({ Suburb: "ST LEONARDS", Region: "NSW", PostalCode: "2065" }, "72 Sample Street");
+  assert.equal(x.address?.address1, "72 Sample Street");
+  // explicit state beats a shared postcode (2620 = NSW and ACT)
+  x = r({ StreetAddress: "2/69 Test Cres", StreetAddress2: "Beard ACT 2620" });
+  assert.equal(x.address?.zoneCode, "ACT");
+});
+
+test("phone numbers are never read as postcodes", () => {
+  const x = toShopifyAddress({ StreetAddress: "13 Test Road", Suburb: "KINGSWOOD", Country: "Raphel 4736 8211" } as never, undefined, "Site");
+  assert.equal(x.address, undefined);
+});
+
+test("notes saved as addresses are flagged, not imported", () => {
+  for (const a of [{ AddressName: "Picked up by Someone" }, { AddressName: "X", StreetAddress: "24/04/26" }]) {
+    const x = toShopifyAddress(a as never, undefined, a.AddressName);
+    assert.equal(x.address, undefined);
+    assert.ok(x.notASite);
+  }
+});
