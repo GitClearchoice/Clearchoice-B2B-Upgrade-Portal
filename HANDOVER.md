@@ -57,7 +57,7 @@ Pricing order, mirroring Unleashed:
 4. Default Sell Price
 
 ## Shopify data model
-- **Company** = Unleashed customer (`company.externalId` = Unleashed Customer Code).
+- **Company** = Unleashed customer. `company.externalId` = Unleashed Customer Code with spaces turned into `_` (Shopify doesn't allow spaces); the **exact** code is in company metafield `unleashed.customer_code`. Use the metafield when sending orders to Unleashed.
 - **Company location** = delivery site from the customer's Unleashed Delivery tab (`externalId` = Unleashed address Guid; its own address, net terms from the Unleashed payment term).
 - **Head-office admin** = Unleashed primary contact → company main contact, Location admin on every site, and company metafield `b2b.budget_admin_contact` = the contact's GID.
 - **Budgets** = metaobject `site_budget` {location, year, month, amount_ex_gst}, plus a default monthly amount per location.

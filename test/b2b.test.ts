@@ -177,7 +177,7 @@ test("apply: creates company with first site, adds other sites, admin, roles, bu
   const roles = calls.find((c) => c.query.includes("companyContactAssignRoles"))!;
   assert.equal((roles.variables.roles as any[]).length, 2);
   assert.ok((roles.variables.roles as any[]).every((x) => x.companyContactRoleId === "role-admin"));
-  const meta = calls.find((c) => c.query.includes("metafieldsSet"))!;
+  const meta = calls.find((c) => c.query.includes("metafieldsSet") && (c.variables.m as any[])[0].key === "budget_admin_contact")!;
   assert.deepEqual((meta.variables.m as any[])[0], { ownerId: "gid://shopify/Company/1", namespace: "b2b", key: "budget_admin_contact", type: "single_line_text_field", value: "contact-new" });
 });
 
@@ -255,7 +255,7 @@ test("Prepaid / Same Day map to due on receipt; month-following uses the default
   assert.equal(parseNetDays("Same Day", 30).days, 0);
   assert.equal(parseNetDays("30th Month following", 30).days, 30); // "30th" isn't "30 days"
   const t = [{ id: "r", name: "Due on receipt", paymentTermsType: "RECEIPT", dueInDays: null }, { id: "n30", name: "Net 30", paymentTermsType: "NET", dueInDays: 30 }];
-  assert.equal(pickTemplate(t, 0).template?.id, "r");
+  assert.equal(pickTemplate(t, 0).template, undefined); // Shopify rejects due-on-receipt for B2B locations
   assert.equal(pickTemplate(t, 30).template?.id, "n30");
 });
 
@@ -400,4 +400,22 @@ test("customer with no usable Delivery tab sites falls back to their main addres
   assert.equal(p.sites.length, 1);
   assert.equal(p.sites[0].address.city, "Parramatta");
   assert.match(p.notes.join(), /used the customer's main address as their one site/);
+});
+
+test("external IDs: spaces become underscores; exact code saved in a metafield", async () => {
+  const { shopifyExternalId } = await import("../src/b2b/import.ts");
+  assert.equal(shopifyExternalId("BIC SERVICES"), "BIC_SERVICES");
+  assert.equal(shopifyExternalId("DELUXE CLEANING P/L"), "DELUXE_CLEANING_P/L");
+  assert.equal(shopifyExternalId("ASSETLINKSERVICESPTYLTD"), "ASSETLINKSERVICESPTYLTD");
+  assert.equal(shopifyExternalId("ACME|depot one"), "ACME_depot_one");
+
+  const { admin, calls } = fakeShopify();
+  const r = await applyCompany(ctxFor(admin, false), planCompany({ ...customer, CustomerCode: "ASSET LINK" } as never, sites as never, 30));
+  assert.equal(r.status, "created", r.notes.join());
+  const create = calls.find((c) => c.query.includes("companyCreate"))!;
+  assert.equal((create.variables.input as any).company.externalId, "ASSET_LINK");
+  const search = calls.find((c) => c.query.includes("companies("))!;
+  assert.equal(search.variables.q, 'external_id:"ASSET_LINK"');
+  const metas = calls.filter((c) => c.query.includes("metafieldsSet")).flatMap((c) => c.variables.m as any[]);
+  assert.ok(metas.some((m) => m.namespace === "unleashed" && m.key === "customer_code" && m.value === "ASSET LINK"));
 });

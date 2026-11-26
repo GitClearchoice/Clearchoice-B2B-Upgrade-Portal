@@ -32,6 +32,15 @@ export interface CompanyPlan {
 }
 
 /** "30 Days" → 30; "Same Day" / "Prepaid" → 0 (due on receipt). Anything else uses the default (and says so). */
+/**
+ * Shopify external IDs allow letters, numbers and some symbols, but not spaces. Unleashed codes
+ * often have spaces ("BIC SERVICES"), so spaces (and anything else not allowed) become "_".
+ * The exact Unleashed code is kept in the company metafield unleashed.customer_code.
+ */
+export function shopifyExternalId(code: string): string {
+  return code.trim().replace(/[^A-Za-z0-9!@#$%^&*(){}\[\]\\/?<>_\-~,.;:'`"]/g, "_").slice(0, 255);
+}
+
 export function parseNetDays(term: string | null | undefined, fallback: number): { days: number; note?: string } {
   const t = (term ?? "").trim();
   const m = /(\d+)\s*days?/i.exec(t);
@@ -195,12 +204,13 @@ export async function findCompany(ctx: ImportContext, code: string): Promise<Exi
   }
   if (!raw) {
     // Search with a light query (Shopify limits query cost), then load the one match in full.
-    const q = `external_id:"${code.replace(/(["\\])/g, "\\$1")}"`;
+    const ext = shopifyExternalId(code);
+    const q = `external_id:"${ext.replace(/(["\\])/g, "\\$1")}"`;
     const r = await ctx.admin.graphql<{ companies: { nodes: { id: string; externalId: string | null }[] } }>(
       `query($q: String!) { companies(first: 10, query: $q) { nodes { id externalId } } }`,
       { q },
     );
-    const hit = r.companies.nodes.find((c) => c.externalId === code);
+    const hit = r.companies.nodes.find((c) => c.externalId === ext);
     if (hit) {
       const full = await ctx.admin.graphql<{ company: RawCompany | null }>(`query($id: ID!) { company(id: $id) { ${COMPANY_FIELDS} } }`, { id: hit.id });
       raw = full.company ?? undefined;
@@ -246,8 +256,9 @@ async function allRoleLocationIds(ctx: ImportContext, contactId: string): Promis
 
 export function pickTemplate(templates: PaymentTermsTemplate[], days: number): { template?: PaymentTermsTemplate; note?: string } {
   if (days === 0) {
-    const receipt = templates.find((t) => /receipt/i.test(t.paymentTermsType));
-    return receipt ? { template: receipt } : { note: "Shopify has no 'due on receipt' terms; none set" };
+    // Shopify doesn't allow "due on receipt" on B2B locations. Trade orders are invoiced by Unleashed
+    // anyway (the Shopify draft is never completed), so no Shopify terms is fine here.
+    return { note: "Prepaid / Same Day in Unleashed: no payment terms set in Shopify" };
   }
   const net = templates.filter((t) => /net/i.test(t.paymentTermsType) && t.dueInDays != null);
   const exact = net.find((t) => t.dueInDays === days);
@@ -260,7 +271,7 @@ export function pickTemplate(templates: PaymentTermsTemplate[], days: number): {
 function locationInput(site: PlannedSite, templateId: string | undefined) {
   return {
     name: site.name,
-    externalId: site.externalId,
+    externalId: shopifyExternalId(site.externalId),
     shippingAddress: site.address,
     billingSameAsShipping: true,
     ...(site.note ? { note: site.note } : {}),
@@ -293,14 +304,14 @@ export async function applyCompany(ctx: ImportContext, plan: CompanyPlan): Promi
     if (!company) {
       const first = plan.sites[0];
       if (dry) {
-        company = { id: fakeId("company", plan.code), externalId: plan.code, mainContact: null, locations: [], contacts: [], roles: [] };
-        company.locations.push({ id: fakeId("site", first.externalId), externalId: first.externalId, name: first.name });
+        company = { id: fakeId("company", plan.code), externalId: shopifyExternalId(plan.code), mainContact: null, locations: [], contacts: [], roles: [] };
+        company.locations.push({ id: fakeId("site", first.externalId), externalId: shopifyExternalId(first.externalId), name: first.name });
       } else {
         const r = await ctx.admin.graphql<{ companyCreate: { company: RawCompany | null; userErrors: UserError[] } }>(
           `mutation($input: CompanyCreateInput!) { companyCreate(input: $input) { company { ${COMPANY_FIELDS} } userErrors { field message code } } }`,
           {
             input: {
-              company: { name: plan.name, externalId: plan.code, note: `Unleashed customer ${plan.code}` },
+              company: { name: plan.name, externalId: shopifyExternalId(plan.code), note: `Unleashed customer ${plan.code}` },
               companyLocation: locationInput(first, template?.id),
             },
           },
@@ -313,12 +324,19 @@ export async function applyCompany(ctx: ImportContext, plan: CompanyPlan): Promi
       changed = true;
     }
     result.companyId = company.id;
+    if (!dry) {
+      const r = await ctx.admin.graphql<{ metafieldsSet: { userErrors: UserError[] } }>(
+        `mutation($m: [MetafieldsSetInput!]!) { metafieldsSet(metafields: $m) { userErrors { field message code } } }`,
+        { m: [{ ownerId: company.id, namespace: "unleashed", key: "customer_code", type: "single_line_text_field", value: plan.code }] },
+      );
+      assertNoUserErrors(`Saving Unleashed code for ${plan.code}`, r.metafieldsSet.userErrors);
+    }
     if (!dry || !company.id.startsWith("(")) ctx.companyMap[plan.code] = company.id;
 
     // 2. Remaining sites
     const byExt = new Map(company.locations.map((l) => [l.externalId ?? "", l]));
     for (const site of plan.sites) {
-      if (byExt.has(site.externalId)) {
+      if (byExt.has(shopifyExternalId(site.externalId)) || byExt.has(site.externalId)) {
         if (!(result.status === "created" && site === plan.sites[0])) result.sitesExisting++;
         continue;
       }
@@ -332,8 +350,8 @@ export async function applyCompany(ctx: ImportContext, plan: CompanyPlan): Promi
         assertNoUserErrors(`Creating site "${site.name}" for ${plan.code}`, r.companyLocationCreate.userErrors);
         id = r.companyLocationCreate.companyLocation!.id;
       }
-      company.locations.push({ id, externalId: site.externalId, name: site.name });
-      byExt.set(site.externalId, company.locations[company.locations.length - 1]);
+      company.locations.push({ id, externalId: shopifyExternalId(site.externalId), name: site.name });
+      byExt.set(shopifyExternalId(site.externalId), company.locations[company.locations.length - 1]);
       result.sitesCreated++;
       changed = true;
     }

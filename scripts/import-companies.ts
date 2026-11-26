@@ -91,10 +91,10 @@ for (const [i, code] of codes.entries()) {
 
 await mkdir("data", { recursive: true });
 const reportPath = apply ? "data/import-report.csv" : "data/import-dry-run.csv";
-await writeFile(reportPath, toCsv([REPORT_HEADER, ...results.map(reportRow)]));
+await writeSafely(reportPath, toCsv([REPORT_HEADER, ...results.map(reportRow)]));
 const skipped = plans.flatMap(skippedRows);
 if (skipped.length) {
-  await writeFile("data/skipped-sites.csv", toCsv([SKIPPED_HEADER, ...skipped]));
+  await writeSafely("data/skipped-sites.csv", toCsv([SKIPPED_HEADER, ...skipped]));
   console.log(`\n${skipped.length} site(s) skipped because of their address. Most common reasons:`);
   for (const [reason, n] of reasonCounts(plans).slice(0, 6)) console.log(`  ${String(n).padStart(4)}  ${reason}`);
   console.log("Details (fix these on the customer's Delivery tab in Unleashed, then re-run): data/skipped-sites.csv");
@@ -103,3 +103,15 @@ const count = (s: string) => results.filter((r) => r.status === s).length;
 console.log(`\n${apply ? "Done" : "Dry run done"}: ${count("created")} created, ${count("updated")} updated, ${count("unchanged")} unchanged, ${count("skipped")} skipped, ${count("error")} errors.`);
 console.log(`Report: ${reportPath}`);
 if (!apply) console.log("Nothing was changed. Add --apply to make these changes.");
+
+/** If Excel has the file open (Windows locks it), save under a new name instead of crashing. */
+async function writeSafely(path: string, text: string) {
+  try {
+    await writeFile(path, text);
+  } catch (e) {
+    if (!["EBUSY", "EPERM"].includes((e as NodeJS.ErrnoException).code ?? "")) throw e;
+    const alt = path.replace(/\.csv$/, `-${new Date().toISOString().replace(/[:.]/g, "-")}.csv`);
+    await writeFile(alt, text);
+    console.log(`(${path} is open in another program, so this copy was saved as ${alt})`);
+  }
+}
