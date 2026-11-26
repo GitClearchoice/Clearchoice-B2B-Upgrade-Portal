@@ -15,6 +15,7 @@
     "price": "node --env-file-if-exists=.env scripts/price.ts",
     "trade:candidates": "node --env-file=.env scripts/trade-candidates.ts",
     "import:companies": "node --env-file=.env scripts/import-companies.ts",
+    "order:test": "node --env-file=.env scripts/test-unleashed-order.ts",
     "typecheck": "tsc --noEmit"
   },
   "devDependencies": {

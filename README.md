@@ -50,6 +50,16 @@ Reports: `data/import-dry-run.csv` / `data/import-report.csv`. The import never 
 
 Shopify setup: in the Dev Dashboard app, add the scopes `write_companies`, `write_customers`, `read_payment_terms`, release a new version and reinstall it on the dev store. Put `SHOPIFY_SHOP`, `SHOPIFY_CLIENT_ID`, `SHOPIFY_CLIENT_SECRET` in `.env`.
 
+## Phase 3, step 1: test order straight to Unleashed
+
+```bash
+npm run order:test            # dry run: prints the order it would send
+npm run order:test -- --send  # sends ONE test order to the Unleashed sandbox
+# options: --customer CODE --site "part of site name/address" --sku CODE --qty N --po TEXT
+```
+
+Checks the warehouse and tax code exist first, prices from the last sync, and saves the order's Guid to `data/test-orders.json` before sending (so a retry can't duplicate it). Settings: `UNLEASHED_ORDER_STATUS`, `UNLEASHED_WAREHOUSE`, `UNLEASHED_TAX_CODE`, `UNLEASHED_TAX_RATE`.
+
 ## Running it
 
 Needs Node 22.18 or later. No runtime dependencies.

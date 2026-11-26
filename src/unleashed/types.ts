@@ -110,3 +110,19 @@ export interface USalesOrder {
   OrderStatus?: string | null;
   Customer?: { CustomerCode?: string | null } | null;
 }
+
+export interface UWarehouse {
+  Guid: string;
+  WarehouseCode: string;
+  WarehouseName: string;
+  Obsolete?: boolean;
+}
+
+export interface UTax {
+  Guid?: string;
+  TaxCode: string;
+  TaxRate: number;
+  Description?: string | null;
+  SalesTax?: boolean;
+  Obsolete?: boolean;
+}

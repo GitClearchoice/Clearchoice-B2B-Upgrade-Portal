@@ -1,5 +1,5 @@
 import { buildQuery, signQuery } from "./signature.ts";
-import type { UCustomer, UCustomerDeliveryAddresses, UPage, UProduct, UProductPrice, USalesOrder, USellPriceTier } from "./types.ts";
+import type { UCustomer, UCustomerDeliveryAddresses, UPage, UProduct, UProductPrice, USalesOrder, USellPriceTier, UTax, UWarehouse } from "./types.ts";
 
 export interface UnleashedConfig {
   apiId: string;
@@ -47,7 +47,20 @@ export class UnleashedClient {
   }
 
   /** Signed GET. `path` is e.g. "/Products/2"; params become the signed query string. */
-  async get<T>(path: string, params: Params = {}): Promise<T> {
+  get<T>(path: string, params: Params = {}): Promise<T> {
+    return this.request<T>("GET", path, params);
+  }
+
+  /**
+   * Signed POST (create). Unleashed signs the query string only, so a POST with no query signs "".
+   * Not retried on 5xx: a create that timed out may have gone through. Callers use a fixed Guid in
+   * the path so a deliberate retry updates the same record instead of creating a second one.
+   */
+  post<T>(path: string, body: unknown): Promise<T> {
+    return this.request<T>("POST", path, {}, body);
+  }
+
+  private async request<T>(method: "GET" | "POST", path: string, params: Params, body?: unknown): Promise<T> {
     const qs = buildQuery(params);
     const url = `${this.cfg.baseUrl}${path}${qs ? `?${qs}` : ""}`;
     const headers = {
@@ -59,13 +72,13 @@ export class UnleashedClient {
     };
 
     for (let attempt = 0; ; attempt++) {
-      const res = await this.fetchFn(url, { method: "GET", headers });
+      const res = await this.fetchFn(url, { method, headers, ...(body !== undefined ? { body: JSON.stringify(body) } : {}) });
       if (res.ok) return (await res.json()) as T;
 
-      const body = await res.text().catch(() => "");
-      const retryable = res.status === 429 || res.status >= 500;
+      const text = await res.text().catch(() => "");
+      const retryable = res.status === 429 || (method === "GET" && res.status >= 500);
       if (!retryable || attempt >= this.cfg.maxRetries) {
-        throw new UnleashedError(`Unleashed GET ${path} failed: ${res.status}`, res.status, body.slice(0, 500));
+        throw new UnleashedError(`Unleashed ${method} ${path} failed: ${res.status}${text ? ` (${text.slice(0, 300)})` : ""}`, res.status, text.slice(0, 2000));
       }
       const retryAfter = Number(res.headers.get("retry-after"));
       const wait = Number.isFinite(retryAfter) && retryAfter > 0 ? retryAfter * 1000 : 1000 * 2 ** attempt;
@@ -126,6 +139,16 @@ export class UnleashedClient {
     for await (const o of this.paginate<USalesOrder>("SalesOrders", { startDate: opts.startDate, endDate: opts.endDate })) {
       yield { OrderNumber: o.OrderNumber, OrderDate: o.OrderDate, OrderStatus: o.OrderStatus, Customer: { CustomerCode: o.Customer?.CustomerCode } };
     }
+  }
+
+  async warehouses(): Promise<UWarehouse[]> {
+    const data = await this.get<UPage<UWarehouse> | UWarehouse[]>("/Warehouses");
+    return Array.isArray(data) ? data : data.Items ?? [];
+  }
+
+  async taxes(): Promise<UTax[]> {
+    const data = await this.get<UPage<UTax> | UTax[]>("/Taxes");
+    return Array.isArray(data) ? data : data.Items ?? [];
   }
 
   async sellPriceTiers(): Promise<USellPriceTier[]> {
