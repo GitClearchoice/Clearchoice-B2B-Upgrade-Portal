@@ -362,3 +362,42 @@ test("notes saved as addresses are flagged, not imported", () => {
     assert.ok(x.notASite);
   }
 });
+
+test("postcode lookup: fills a missing postcode only when the data agrees", async () => {
+  const { PostcodeLookup } = await import("../src/b2b/address.ts");
+  const lookup = new PostcodeLookup().learn([
+    { StreetAddress: "1 A St", City: "Pyrmont", Region: "NSW", PostalCode: "2009" },
+    { StreetAddress: "2 B St", City: "PYRMONT", PostalCode: "2009" },
+    { StreetAddress: "1 C St", City: "Richmond", Region: "NSW", PostalCode: "2753" },
+    { StreetAddress: "1 D St", City: "Richmond", Region: "VIC", PostalCode: "3121" },
+  ] as never);
+  assert.deepEqual(lookup.find("pyrmont"), { postcode: "2009", state: "NSW" });
+  assert.equal(lookup.find("Richmond"), null); // ambiguous across states
+  assert.deepEqual(lookup.find("Richmond", "VIC"), { postcode: "3121", state: "VIC" });
+
+  const x = toShopifyAddress({ StreetAddress: "120 Test Street", StreetAddress2: "Pyrmont" } as never, undefined, "Job 61", lookup);
+  assert.deepEqual([x.address?.address1, x.address?.city, x.address?.zip, x.address?.zoneCode], ["120 Test Street", "Pyrmont", "2009", "NSW"]);
+  assert.ok(x.postcodeFilled);
+  const amb = toShopifyAddress({ StreetAddress: "5 Test Rd", StreetAddress2: "Richmond" } as never, undefined, "S", lookup);
+  assert.equal(amb.address, undefined);
+});
+
+test("more patterns: 'Deliver to:', trailing dots, street+suburb in one field, long lot numbers", () => {
+  const r = (a: Record<string, string>) => toShopifyAddress(a as never, undefined, "S");
+  let x = r({ StreetAddress: "LOTS 53, 54 & 56 7-13 TEST STREET, SYDNEY, NSW,  2000" });
+  assert.deepEqual([x.address?.address1, x.address?.zip], ["LOTS 53, 54 & 56 7-13 TEST STREET", "2000"]);
+  x = r({ StreetAddress: "219 Sample Street Strawberry Hills, NSW 2012" });
+  assert.deepEqual([x.address?.address1, x.address?.city], ["219 Sample Street", "Strawberry Hills"]);
+  x = r({ StreetAddress: "78-94 Test Drive", StreetAddress2: "Welshpool WA", Region: "", PostalCode: "6106." });
+  assert.deepEqual([x.address?.city, x.address?.zip, x.address?.zoneCode], ["Welshpool", "6106", "WA"]);
+  x = r({ StreetAddress: "Deliver to:", StreetAddress2: "23/1 Test Road", Suburb: "MACQUARIE PARK 2113" });
+  assert.equal(x.address?.address1, "23/1 Test Road");
+});
+
+test("customer with no usable Delivery tab sites falls back to their main address", () => {
+  const p = planCompany({ ...customer, Addresses: [{ AddressType: "Postal", StreetAddress: "PO Box 1", City: "Sydney", PostalCode: "2001" }, { AddressType: "Physical", StreetAddress: "9 Main Rd", City: "Parramatta", Region: "NSW", PostalCode: "2150" }] } as never,
+    [{ Guid: "n1", AddressName: "Picked up by Someone" }, { Guid: "n2", AddressName: "TARONGA ZOO" }] as never, 30);
+  assert.equal(p.sites.length, 1);
+  assert.equal(p.sites[0].address.city, "Parramatta");
+  assert.match(p.notes.join(), /used the customer's main address as their one site/);
+});

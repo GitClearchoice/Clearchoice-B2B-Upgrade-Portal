@@ -11,6 +11,7 @@ import {
   type CompanyPlan, type ImportResult,
 } from "../src/b2b/import.ts";
 import { ShopifyAdmin } from "../src/shopify/client.ts";
+import { PostcodeLookup } from "../src/b2b/address.ts";
 import { loadConfig } from "./config.ts";
 
 const args = process.argv.slice(2);
@@ -57,6 +58,12 @@ const [customers, delivery] = await Promise.all([
 const byCode = new Map(customers.map((c) => [c.CustomerCode, c]));
 const sitesByCode = new Map(delivery.map((d) => [d.CustomerCode, d.Addresses ?? []]));
 
+// Learn suburb → postcode from every complete address in Unleashed (all customers), to fill in missing postcodes.
+const lookup = new PostcodeLookup()
+  .learn(customers.flatMap((c) => c.Addresses ?? []))
+  .learn(delivery.flatMap((d) => d.Addresses ?? []));
+console.log(`Learned postcodes for ${lookup.size} suburbs from existing Unleashed addresses.`);
+
 const mapPath = "data/company-map.json";
 let companyMap: Record<string, string> = {};
 try { companyMap = JSON.parse(await readFile(mapPath, "utf8")); } catch {}
@@ -72,7 +79,7 @@ for (const [i, code] of codes.entries()) {
     results.push({ code, name: "", status: "error", companyId: "", sitesCreated: 0, sitesExisting: 0, sitesSkipped: [], contact: "", paymentTerms: "", notes: ["not found in Unleashed"] });
     continue;
   }
-  const plan = planCompany(customer, sitesByCode.get(code), defaultNetDays);
+  const plan = planCompany(customer, sitesByCode.get(code), defaultNetDays, lookup);
   plans.push(plan);
   const r = await applyCompany(ctx, plan);
   results.push(r);

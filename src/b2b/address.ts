@@ -54,26 +54,33 @@ export interface AddressResult {
   extraNote?: string;
   /** Looks like a note saved as an address ("Picked up by Peter", a date, a name), not a delivery site. */
   notASite?: boolean;
+  /** The postcode wasn't in Unleashed; it was filled in from other addresses in the same suburb. */
+  postcodeFilled?: boolean;
 }
 
 /**
  * Unleashed address → Shopify company address. Country defaults to Australia when blank.
  * Unleashed uses Suburb and City inconsistently, so we use City, falling back to Suburb.
  */
-export function toShopifyAddress(a: UAddress, recipient?: string, siteName?: string): AddressResult {
+export function toShopifyAddress(a: UAddress, recipient?: string, siteName?: string, lookup?: PostcodeLookup): AddressResult {
   const strict = strictAddress(a, recipient);
   if (strict.address) return strict;
-  const rebuilt = rebuildAddress(a, recipient, siteName);
+  const rebuilt = rebuildAddress(a, recipient, siteName, lookup);
   if (rebuilt.address) return rebuilt;
   if (looksLikeNote(a, siteName)) return { problems: ["not a delivery address (looks like a note)"], notASite: true };
   return strict;
 }
 
-function strictAddress(a: UAddress, recipient?: string): AddressResult {
+export function strictAddress(a: UAddress, recipient?: string): AddressResult {
   const problems: string[] = [];
-  const address1 = clean(a.StreetAddress);
-  const address2 = clean(a.StreetAddress2);
-  const city = clean(a.City) || clean(a.Suburb);
+  let address1 = tidy(a.StreetAddress);
+  let address2 = tidy(a.StreetAddress2);
+  // "Deliver to:" / a note in the first street line, real street in the second.
+  if ((!address1 || isNoteish(address1)) && isStreetLike(address2)) { address1 = address2; address2 = ""; }
+  if (isNoteish(address1)) address1 = "";
+  const stateTail = new RegExp(`[\\s,]*((${STATE_WORDS})[\\s,]*)?\\d{4}$`, "i");
+  const city = (clean(a.City) || clean(a.Suburb)).replace(stateTail, "").trim();
+  if (/\d/.test(city)) problems.push(`suburb "${city}" has numbers in it`);
   const countryRaw = clean(a.Country).toLowerCase();
   const countryCode = countryRaw ? COUNTRIES[countryRaw] ?? (countryRaw.length === 2 ? countryRaw.toUpperCase() : "") : "AU";
   const regionRaw = clean(a.Region).toLowerCase().replace(/\./g, "").trim();
@@ -135,12 +142,21 @@ const STATE_WORDS = "N\\.?S\\.?W\\.?|NEW SOUTH WALES|VIC|VICTORIA|QLD|QUEENSLAND
 const STREET_SUFFIX = "st|street|rd|road|hwy|highway|dr|drive|ave|avenue|av|pde|parade|cres|crescent|cr|pl|place|cl|close|ct|court|tce|terrace|way|lane|ln|blvd|boulevard|cct|circuit|parkway|pkwy|esp|esplanade|gr|grove|sq|square";
 
 const tidy = (s: string | null | undefined) =>
-  (s ?? "").replace(/\*+/g, " ").replace(/\s+/g, " ").replace(/^[\s,.\-:]+|[\s,]+$/g, "").trim();
+  (s ?? "")
+    .replace(/\*+/g, " ")
+    .replace(/^\s*(please\s+)?deliver(y)?\s+to\s*:?\s*/i, "")
+    .replace(/\s+/g, " ")
+    .replace(/^[\s,.\-:]+|[\s,.]+$/g, "")
+    .trim();
 
 /** Phone numbers: 8+ digits, or typical AU formats. These must never be read as postcodes. */
 export function isPhoneLike(s: string): boolean {
-  const digits = s.replace(/\D/g, "");
-  return digits.length >= 8 || /\b0[2-478]\s?\d{4}\s?\d{4}\b/.test(s) || /\(0\d\)\s*\d{4}/.test(s);
+  // A run of digits (allowing spaces, brackets, dashes) with 8+ digits, e.g. "0401 248 826", "8825 2400", "(02)49346904".
+  // Counting all digits in the text would wrongly flag addresses like "Lots 53, 54 & 56 7-13 Hunter St".
+  for (const run of s.match(/[\d(][\d\s()\-]{6,}\d/g) ?? []) {
+    if (run.replace(/\D/g, "").length >= 8) return true;
+  }
+  return /\(0\d\)\s*\d{4}/.test(s);
 }
 
 const NOTEISH = /picked up|pick up|\battn?\b|attention|contact|\bcall\b|site contact|requested|for saturday|work for|loading dock|\bdock\b|before \d|\d\s?(am|pm)\b|@|deliver|leave at|walk in|^for\b|^c\/o\b|cleaner\b|manager\b|reference/i;
@@ -185,7 +201,7 @@ function stateCode(word: string | undefined): string | undefined {
   return AU_STATES[word.toLowerCase().replace(/\./g, "").trim()];
 }
 
-export function rebuildAddress(a: UAddress, recipient?: string, siteName?: string): AddressResult {
+export function rebuildAddress(a: UAddress, recipient?: string, siteName?: string, lookup?: PostcodeLookup): AddressResult {
   const fields = [a.StreetAddress, a.StreetAddress2, a.Suburb, a.City, a.Region, a.PostalCode, a.Country].map(tidy);
   const name = tidy(siteName ?? a.AddressName);
 
@@ -197,6 +213,10 @@ export function rebuildAddress(a: UAddress, recipient?: string, siteName?: strin
     if (loc) locIdx = i;
   }
   if (!loc) { loc = findLocality(name); if (loc) locIdx = -2; }
+  if (!loc && lookup) {
+    const filled = fillPostcode(fields, name, lookup);
+    if (filled) return finishRebuild(filled, fields, recipient, true);
+  }
   if (!loc) return { problems: ["couldn't find a suburb and postcode in any field"] };
 
   const state = stateCode(loc.state) ?? stateFromPostcode(loc.postcode);
@@ -205,11 +225,17 @@ export function rebuildAddress(a: UAddress, recipient?: string, siteName?: strin
   const used = new Set<number>();
   if (locIdx >= 0) used.add(locIdx);
 
-  // 2. Suburb: from the locality, else the nearest place-like field before it.
+  // 2. Suburb: from the locality, else the end of the street text ("219 Chalmers Street Strawberry Hills"),
+  //    else the nearest place-like field before it ("Welshpool WA" → "Welshpool").
   let suburb = loc.suburb;
+  if (!suburb && loc.before) {
+    const m = new RegExp(`^(.*\\b(?:${STREET_SUFFIX})\\.?)\\s+([a-z][a-z .'\\-]+)$`, "i").exec(loc.before);
+    if (m) { loc = { ...loc, before: tidy(m[1]) }; suburb = tidy(m[2]); }
+  }
   if (!suburb && locIdx >= 0) {
     for (let i = locIdx - 1; i >= 0; i--) {
-      if (isPlaceLike(fields[i])) { suburb = fields[i]; used.add(i); break; }
+      const f = fields[i].replace(new RegExp(`\\s+(${STATE_WORDS})$`, "i"), "");
+      if (isPlaceLike(f)) { suburb = f; used.add(i); break; }
     }
   }
   if (!suburb) return { problems: ["found a postcode but no suburb"] };
@@ -231,26 +257,112 @@ export function rebuildAddress(a: UAddress, recipient?: string, siteName?: strin
 
   // 4. Everything else useful goes in the site note (contacts, phone numbers, dock notes).
   const stateOnly = new RegExp(`^(${STATE_WORDS})$`, "i");
+  return finishRebuild({ street, suburb, state, postcode: loc.postcode, used }, fields, recipient, false);
+}
+
+interface Rebuilt { street: string; suburb: string; state: string; postcode: string; used: Set<number> }
+
+function finishRebuild(r: Rebuilt, fields: string[], recipient: string | undefined, postcodeFilled: boolean): AddressResult {
+  const stateOnly = new RegExp(`^(${STATE_WORDS})$`, "i");
+  const sub = r.suburb.toLowerCase();
   const leftovers = [...new Set(fields.filter((f, i) =>
-    f && !used.has(i) && f !== street && !/^(australia|au)$/i.test(f) && f.toLowerCase() !== suburb.toLowerCase() &&
+    f && !r.used.has(i) && f !== r.street && !/^(australia|au)$/i.test(f) && f.toLowerCase() !== sub &&
+    f.toLowerCase().replace(new RegExp(`\\s+(${STATE_WORDS})$`, "i"), "") !== sub &&
     !/^\d{4}$/.test(f) && !stateOnly.test(f) && !findLocality(f)))];
   return {
     address: {
-      address1: street.replace(/,$/, ""),
-      city: suburb.replace(/\b\w/g, (c) => c.toUpperCase()).replace(/\B\w/g, (c) => c.toLowerCase()),
-      zoneCode: state,
-      zip: loc.postcode,
+      address1: r.street.replace(/,$/, ""),
+      city: titleCase(r.suburb),
+      zoneCode: r.state,
+      zip: r.postcode,
       countryCode: "AU",
       ...(recipient ? { recipient } : {}),
     },
     problems: [],
     rebuilt: true,
+    ...(postcodeFilled ? { postcodeFilled: true } : {}),
     ...(leftovers.length ? { extraNote: leftovers.join(" | ") } : {}),
   };
+}
+
+const titleCase = (s: string) => s.replace(/\b\w/g, (c) => c.toUpperCase()).replace(/\B\w/g, (c) => c.toLowerCase());
+
+// ---------------------------------------------------------------------------------------------
+// Postcode lookup learned from the complete addresses already in Unleashed
+// ---------------------------------------------------------------------------------------------
+
+const NOT_SUBURBS = /^(AUSTRALIA|AU|NEW ZEALAND|NZ|NSW|VIC|QLD|SA|WA|TAS|NT|ACT)$/;
+const suburbKey = (s: string) => s.toUpperCase().replace(/[^A-Z ]/g, " ").replace(/\bST\b/g, "SAINT").replace(/\bMT\b/g, "MOUNT").replace(/\s+/g, " ").trim();
+
+export class PostcodeLookup {
+  private seen = new Map<string, Map<string, number>>(); // suburb -> "postcode|STATE" -> count
+
+  add(suburb: string, postcode: string, state: string) {
+    const k = suburbKey(suburb);
+    if (!k || !/^\d{4}$/.test(postcode) || NOT_SUBURBS.test(k)) return;
+    const m = this.seen.get(k) ?? new Map<string, number>();
+    const v = `${postcode}|${state}`;
+    m.set(v, (m.get(v) ?? 0) + 1);
+    this.seen.set(k, m);
+  }
+
+  /** Learn from every address that maps cleanly without help. */
+  learn(addresses: UAddress[]) {
+    for (const a of addresses) {
+      const r = strictAddress(a);
+      const ok = r.address ?? rebuildAddress(a).address;
+      if (ok?.zip && ok.zoneCode && ok.countryCode === "AU") this.add(ok.city, ok.zip, ok.zoneCode);
+    }
+    return this;
+  }
+
+  /**
+   * The postcode for a suburb, only when the data agrees: one answer, or one answer in at least
+   * 80% of 3+ sightings. If a state is given, only that state's answers count.
+   */
+  find(suburb: string, state?: string): { postcode: string; state: string } | null {
+    const m = this.seen.get(suburbKey(suburb));
+    if (!m) return null;
+    let entries = [...m];
+    if (state) entries = entries.filter(([v]) => v.endsWith(`|${state}`));
+    if (!entries.length) return null;
+    entries.sort((a, b) => b[1] - a[1]);
+    const total = entries.reduce((n, [, c]) => n + c, 0);
+    const [best, count] = entries[0];
+    if (entries.length > 1 && !(total >= 3 && count / total >= 0.8)) return null;
+    const [postcode, st] = best.split("|");
+    return { postcode, state: st };
+  }
+
+  get size() {
+    return this.seen.size;
+  }
+}
+
+/** Street + suburb but no postcode anywhere: fill the postcode in from the lookup. */
+function fillPostcode(fields: string[], name: string, lookup: PostcodeLookup): Rebuilt | null {
+  const stateWordRe = new RegExp(`\\b(${STATE_WORDS})\\b`, "i");
+  const stateHint = fields.map((f) => stateCode(stateWordRe.exec(f)?.[1])).find(Boolean);
+  // Suburb: a place-like field (optionally followed by a state word) the lookup knows.
+  for (let i = 0; i < fields.length; i++) {
+    const f = fields[i].replace(new RegExp(`[\\s,]+(${STATE_WORDS})$`, "i"), "");
+    if (!isPlaceLike(f) || NOT_SUBURBS.test(suburbKey(f))) continue;
+    const hit = lookup.find(f, stateHint);
+    if (!hit) continue;
+    const used = new Set([i]);
+    const order = fields.map((_, j) => j).filter((j) => j !== i);
+    const pick = order.find((j) => /\d/.test(fields[j]) && isStreetLike(fields[j])) ?? order.find((j) => isStreetLike(fields[j]));
+    let street = "";
+    if (pick !== undefined) { street = fields[pick]; used.add(pick); }
+    else street = tidy(new RegExp(`\\d[\\w/\\- &]*?\\b(${STREET_SUFFIX})\\b\\.?`, "i").exec(name)?.[0] ?? "");
+    if (!street) return null;
+    return { street, suburb: f, state: hit.state, postcode: hit.postcode, used };
+  }
+  return null;
 }
 
 /** "Picked up by Peter", "Marco", "24/04/26", "Transport T3 to T1"… with no address anywhere. */
 function looksLikeNote(a: UAddress, siteName?: string): boolean {
   const all = [siteName ?? a.AddressName, a.StreetAddress, a.StreetAddress2, a.Suburb, a.City].map(tidy).filter(Boolean).join(" ");
-  return /picked up|pick up|repairs|work for|for saturday|\b\d{1,2}[./]\d{1,2}[./]\d{2,4}\b|^(peter|marco|gavin|suba)\b/i.test(all);
+  return /picked up|pick up|pickd up|picked by|repairs|work for|for saturday|price list|end of month|\b\d{1,2}[./-]\d{1,2}[./-]\d{2,4}\b|\b(jan|feb|mar|apr|may|jun|jul|aug|sep|oct|nov|dec)[a-z]* (19|20)\d{2}\b|^(peter|marco|gavin|suba)\b/i.test(all);
 }

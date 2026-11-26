@@ -1,6 +1,6 @@
 import type { UAddress, UCustomer } from "../unleashed/types.ts";
 import { assertNoUserErrors, type ShopifyAdmin, type UserError } from "../shopify/client.ts";
-import { siteExternalId, siteName, toShopifyAddress, type ShopifyAddress } from "./address.ts";
+import { siteExternalId, siteName, toShopifyAddress, type PostcodeLookup, type ShopifyAddress } from "./address.ts";
 import { activeDeliveryAddresses } from "./candidates.ts";
 
 // ---------------------------------------------------------------------------------------------
@@ -40,34 +40,43 @@ export function parseNetDays(term: string | null | undefined, fallback: number):
   return { days: fallback, note: t ? `Unleashed payment term "${t}" mapped to Net ${fallback}` : `no payment term in Unleashed; using Net ${fallback}` };
 }
 
-export function planCompany(customer: UCustomer, deliveryAddresses: UAddress[] | undefined, defaultNetDays: number): CompanyPlan {
+/** The customer's own addresses (not the Delivery tab), best first: Shipping, Physical, default, Postal. */
+function mainAddresses(customer: UCustomer): UAddress[] {
+  const main = (customer.Addresses ?? []).filter((a) => a.StreetAddress || a.Suburb || a.City);
+  const rank = (a: UAddress) =>
+    /shipping/i.test(a.AddressType ?? "") ? 0 : /physical/i.test(a.AddressType ?? "") ? 1 : a.IsDefault ? 2 : 3;
+  return main.slice().sort((a, b) => rank(a) - rank(b)).map((a) => ({ ...a, AddressName: a.AddressName || "Main site" }));
+}
+
+export function planCompany(
+  customer: UCustomer,
+  deliveryAddresses: UAddress[] | undefined,
+  defaultNetDays: number,
+  lookup?: PostcodeLookup,
+): CompanyPlan {
   const code = customer.CustomerCode;
   const name = (customer.CustomerName ?? "").trim() || code;
   const notes: string[] = [];
 
   let sources = activeDeliveryAddresses(deliveryAddresses);
+  let usingMain = false;
   if (!sources.length) {
-    const main = (customer.Addresses ?? []).filter((a) => a.StreetAddress);
-    const pick =
-      main.find((a) => /shipping/i.test(a.AddressType ?? "")) ??
-      main.find((a) => /physical/i.test(a.AddressType ?? "")) ??
-      main.find((a) => a.IsDefault) ??
-      main[0];
-    if (pick) {
-      sources = [{ ...pick, AddressName: pick.AddressName || "Main site" }];
-      notes.push("no Delivery tab sites; used the customer's main address");
-    }
+    sources = mainAddresses(customer).slice(0, 1);
+    usingMain = sources.length > 0;
+    if (usingMain) notes.push("no Delivery tab sites; used the customer's main address");
   }
 
   const sites: PlannedSite[] = [];
   const skippedSites: SkippedSite[] = [];
   const seen = new Set<string>();
   let rebuiltCount = 0;
+  let filledCount = 0;
   for (const a of sources) {
     const nm = siteName(a);
-    const { address, problems, rebuilt, extraNote } = toShopifyAddress(a, name, nm);
+    const { address, problems, rebuilt, extraNote, postcodeFilled } = toShopifyAddress(a, name, nm, lookup);
     if (!address) { skippedSites.push({ name: nm, reason: problems.join(", "), address: a }); continue; }
-    if (rebuilt) rebuiltCount++;
+    if (postcodeFilled) filledCount++;
+    else if (rebuilt) rebuiltCount++;
     const externalId = siteExternalId(code, a);
     if (seen.has(externalId)) continue;
     seen.add(externalId);
@@ -77,7 +86,18 @@ export function planCompany(customer: UCustomer, deliveryAddresses: UAddress[] |
     const note = [a.DeliveryInstruction?.trim(), extraNote].filter(Boolean).join(" | ");
     sites.push({ externalId, name: unique, address, ...(note ? { note } : {}) });
   }
+  // None of the Delivery tab entries were usable: fall back to the customer's main address so their buyers can still order.
+  if (!sites.length && !usingMain) {
+    for (const a of mainAddresses(customer)) {
+      const { address, extraNote } = toShopifyAddress(a, name, "Main site", lookup);
+      if (!address) continue;
+      sites.push({ externalId: siteExternalId(code, a), name: "Main site", address, ...(extraNote ? { note: extraNote } : {}) });
+      notes.push("none of the Delivery tab addresses were usable; used the customer's main address as their one site");
+      break;
+    }
+  }
   if (rebuiltCount) notes.push(`${rebuiltCount} site address(es) rebuilt from details in the wrong fields; spot-check them in Shopify`);
+  if (filledCount) notes.push(`${filledCount} site(s) had no postcode in Unleashed; filled in from other addresses in the same suburb`);
   if (!sites.length) notes.push("no usable delivery address, so no company will be created");
 
   const email = (customer.Email ?? "").trim();
