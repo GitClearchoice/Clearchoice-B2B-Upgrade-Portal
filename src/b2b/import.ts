@@ -14,12 +14,18 @@ export interface PlannedSite {
   note?: string;
 }
 
+export interface SkippedSite {
+  name: string;
+  reason: string;
+  address?: UAddress;
+}
+
 export interface CompanyPlan {
   code: string;
   name: string;
   contact: { firstName: string; lastName: string; email: string } | null;
   sites: PlannedSite[];
-  skippedSites: { name: string; reason: string }[];
+  skippedSites: SkippedSite[];
   unleashedPaymentTerm: string;
   netDays: number;
   notes: string[];
@@ -54,12 +60,12 @@ export function planCompany(customer: UCustomer, deliveryAddresses: UAddress[] |
   }
 
   const sites: PlannedSite[] = [];
-  const skippedSites: { name: string; reason: string }[] = [];
+  const skippedSites: SkippedSite[] = [];
   const seen = new Set<string>();
   for (const a of sources) {
     const nm = siteName(a);
     const { address, problems } = toShopifyAddress(a, name);
-    if (!address) { skippedSites.push({ name: nm, reason: problems.join(", ") }); continue; }
+    if (!address) { skippedSites.push({ name: nm, reason: problems.join(", "), address: a }); continue; }
     const externalId = siteExternalId(code, a);
     if (seen.has(externalId)) continue;
     seen.add(externalId);
@@ -126,8 +132,8 @@ interface ExistingCompany {
 const COMPANY_FIELDS = `
   id externalId
   mainContact { id }
-  locations(first: 250) { nodes { id externalId name } pageInfo { hasNextPage endCursor } }
-  contacts(first: 100) { nodes { id customer { id email } roleAssignments(first: 250) { nodes { companyLocation { id } } pageInfo { hasNextPage endCursor } } } }
+  locations(first: 100) { nodes { id externalId name } pageInfo { hasNextPage endCursor } }
+  contacts(first: 10) { nodes { id customer { id email } roleAssignments(first: 25) { nodes { companyLocation { id } } pageInfo { hasNextPage endCursor } } } }
   contactRoles(first: 10) { nodes { id name } }
 `;
 
@@ -164,12 +170,17 @@ export async function findCompany(ctx: ImportContext, code: string): Promise<Exi
     if (r.company) raw = r.company;
   }
   if (!raw) {
+    // Search with a light query (Shopify limits query cost), then load the one match in full.
     const q = `external_id:"${code.replace(/(["\\])/g, "\\$1")}"`;
-    const r = await ctx.admin.graphql<{ companies: { nodes: RawCompany[] } }>(
-      `query($q: String!) { companies(first: 10, query: $q) { nodes { ${COMPANY_FIELDS} } } }`,
+    const r = await ctx.admin.graphql<{ companies: { nodes: { id: string; externalId: string | null }[] } }>(
+      `query($q: String!) { companies(first: 10, query: $q) { nodes { id externalId } } }`,
       { q },
     );
-    raw = r.companies.nodes.find((c) => c.externalId === code);
+    const hit = r.companies.nodes.find((c) => c.externalId === code);
+    if (hit) {
+      const full = await ctx.admin.graphql<{ company: RawCompany | null }>(`query($id: ID!) { company(id: $id) { ${COMPANY_FIELDS} } }`, { id: hit.id });
+      raw = full.company ?? undefined;
+    }
   }
   if (!raw) return null;
   const company = toExisting(raw);
@@ -409,4 +420,23 @@ export const REPORT_HEADER = [
 
 export function reportRow(r: ImportResult): (string | number)[] {
   return [r.code, r.name, r.status, r.companyId, r.sitesCreated, r.sitesExisting, r.sitesSkipped.join(" | "), r.contact, r.paymentTerms, r.notes.join(" | ")];
+}
+
+export const SKIPPED_HEADER = ["Customer Code", "Site Name", "Street", "Street 2", "Suburb", "City", "State", "Postcode", "Country", "Why it was skipped"];
+
+export function skippedRows(plan: CompanyPlan): string[][] {
+  return plan.skippedSites.map((s) => [
+    plan.code, s.name, s.address?.StreetAddress ?? "", s.address?.StreetAddress2 ?? "", s.address?.Suburb ?? "",
+    s.address?.City ?? "", s.address?.Region ?? "", s.address?.PostalCode ?? "", s.address?.Country ?? "", s.reason,
+  ]);
+}
+
+/** "no postcode, no state" x 40 → [["no postcode", 40], ["no state", 40]] */
+export function reasonCounts(plans: CompanyPlan[]): [string, number][] {
+  const counts = new Map<string, number>();
+  for (const p of plans) for (const s of p.skippedSites) for (const r of s.reason.split(", ")) {
+    const key = r.replace(/".*"/, '"…"');
+    counts.set(key, (counts.get(key) ?? 0) + 1);
+  }
+  return [...counts].sort((a, b) => b[1] - a[1]);
 }

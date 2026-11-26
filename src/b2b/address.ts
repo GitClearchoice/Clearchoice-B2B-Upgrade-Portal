@@ -29,6 +29,22 @@ const AU_STATES: Record<string, string> = {
 
 const clean = (s: string | null | undefined) => (s ?? "").replace(/\s+/g, " ").trim();
 
+/** Australian state/territory from a postcode (Australia Post ranges). */
+export function stateFromPostcode(zip: string): string | undefined {
+  if (!/^\d{4}$/.test(zip)) return undefined;
+  const n = Number(zip);
+  const inR = (a: number, b: number) => n >= a && n <= b;
+  if (inR(200, 299) || inR(2600, 2618) || inR(2900, 2920)) return "ACT";
+  if (inR(1000, 2599) || inR(2619, 2899) || inR(2921, 2999)) return "NSW";
+  if (inR(3000, 3999) || inR(8000, 8999)) return "VIC";
+  if (inR(4000, 4999) || inR(9000, 9999)) return "QLD";
+  if (inR(5000, 5999)) return "SA";
+  if (inR(6000, 6999)) return "WA";
+  if (inR(7000, 7999)) return "TAS";
+  if (inR(800, 999)) return "NT";
+  return undefined;
+}
+
 export interface AddressResult {
   address?: ShopifyAddress;
   problems: string[];
@@ -45,17 +61,24 @@ export function toShopifyAddress(a: UAddress, recipient?: string): AddressResult
   const city = clean(a.City) || clean(a.Suburb);
   const countryRaw = clean(a.Country).toLowerCase();
   const countryCode = countryRaw ? COUNTRIES[countryRaw] ?? (countryRaw.length === 2 ? countryRaw.toUpperCase() : "") : "AU";
-  const regionRaw = clean(a.Region).toLowerCase();
-  const zip = clean(a.PostalCode);
+  const regionRaw = clean(a.Region).toLowerCase().replace(/\./g, "").trim();
+  let zip = clean(a.PostalCode).replace(/\s/g, "");
+  // Postcode sometimes typed into the state or city field ("NSW 2000"); pick it up from there.
+  if (!/^\d{4}$/.test(zip)) {
+    const m = /\b(\d{4})\b/.exec(`${a.Region ?? ""} ${a.City ?? ""} ${a.Suburb ?? ""}`);
+    if (m && countryRaw !== "new zealand" && countryRaw !== "nz") zip = m[1];
+  }
 
   if (!address1) problems.push("no street address");
   if (!city) problems.push("no suburb/city");
   if (!countryCode) problems.push(`unknown country "${a.Country}"`);
   let zoneCode: string | undefined;
   if (countryCode === "AU") {
-    zoneCode = AU_STATES[regionRaw];
-    if (!zoneCode) problems.push(regionRaw ? `unknown state "${a.Region}"` : "no state");
-    if (!/^\d{4}$/.test(zip)) problems.push(zip ? `postcode "${zip}" isn't 4 digits` : "no postcode");
+    const regionWord = regionRaw.replace(/\b\d{4}\b/, "").trim();
+    // Trust the postcode over the State field: it's typed more reliably.
+    zoneCode = stateFromPostcode(zip) ?? AU_STATES[regionWord];
+    if (!/^\d{4}$/.test(zip)) problems.push(zip ? `postcode "${clean(a.PostalCode)}" isn't 4 digits` : "no postcode");
+    if (!zoneCode) problems.push(regionWord ? `unknown state "${a.Region}"` : "no state");
   }
   if (problems.length) return { problems };
   return {

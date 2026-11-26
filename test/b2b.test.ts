@@ -19,7 +19,8 @@ test("Unleashed address → Shopify address, with state and country mapping", ()
 test("bad addresses are reported, not sent", () => {
   const r = toShopifyAddress({ StreetAddress: "", City: "Sydney", Region: "XX", PostalCode: "20" });
   assert.equal(r.address, undefined);
-  assert.match(r.problems.join(), /no street address.*unknown state.*postcode/);
+  const all = r.problems.join();
+  for (const re of [/no street address/, /unknown state/, /postcode "20"/]) assert.match(all, re);
 });
 
 test("site external ID uses the Unleashed address Guid", () => {
@@ -62,14 +63,14 @@ const sites = [
   { Guid: "s1", AddressName: "Western Sydney", StreetAddress: "1 West St", Suburb: "Penrith", Region: "NSW", PostalCode: "2750", DeliveryInstruction: "Dock 2" },
   { Guid: "s2", AddressName: "Hospital", StreetAddress: "2 Health Ave", City: "Westmead", Region: "NSW", PostalCode: "2145" },
   { Guid: "s3", AddressName: "Old site", StreetAddress: "3 Gone St", City: "X", Region: "NSW", PostalCode: "2000", Obsolete: true },
-  { Guid: "s4", AddressName: "Broken", StreetAddress: "4 No State St", City: "Y", PostalCode: "2000" },
+  { Guid: "s4", AddressName: "Broken", StreetAddress: "4 No Postcode St", City: "Y" },
 ];
 
 test("plan uses Delivery tab sites, skips obsolete, reports bad ones", () => {
   const p = planCompany(customer as never, sites as never, 30);
   assert.deepEqual(p.sites.map((s) => s.name), ["Western Sydney", "Hospital"]);
   assert.equal(p.sites[0].note, "Dock 2");
-  assert.deepEqual(p.skippedSites, [{ name: "Broken", reason: "no state" }]);
+  assert.deepEqual(p.skippedSites.map((s) => [s.name, s.reason]), [["Broken", "no postcode, no state"]]);
   assert.deepEqual(p.contact, { email: "jo@assetlink.example", firstName: "Jo", lastName: "Smith" });
   assert.equal(p.netDays, 30);
 });
@@ -136,6 +137,7 @@ function fakeShopify(existingCompany: unknown | null = null, existingCustomer: u
       contactRoles: { nodes: [{ id: "role-admin", name: "Location admin" }, { id: "role-order", name: "Ordering only" }] },
     });
     if (query.includes("companies(")) return reply({ companies: { nodes: existingCompany ? [existingCompany] : [] } });
+    if (query.includes("company(id: $id) {")) return reply({ company: existingCompany });
     if (query.includes("companyCreate")) {
       const loc = variables.input.companyLocation;
       return reply({ companyCreate: { company: companyNode([{ id: `loc-${locN++}`, externalId: loc.externalId, name: loc.name }]), userErrors: [] } });
@@ -265,13 +267,19 @@ test("apply: company with more than 250 sites is paged, so re-runs don't recreat
     const { query, variables } = JSON.parse(String(init!.body));
     calls.push(query);
     const reply = (data: unknown) => new Response(JSON.stringify({ data }));
-    if (query.includes("companies(")) {
-      return reply({ companies: { nodes: [{
+    if (query.includes("companies(")) return reply({ companies: { nodes: [{ id: "C1", externalId: "BIG" }] } });
+    if (query.includes("locations(first: 250, after")) {
+      const start = variables.after ? 250 : 0;
+      const nodes = locs.slice(start, start + 250);
+      return reply({ company: { locations: { nodes, pageInfo: { hasNextPage: start + 250 < locs.length, endCursor: `c${start + 250}` } } } });
+    }
+    if (query.includes("company(id: $id) {")) {
+      return reply({ company: {
         id: "C1", externalId: "BIG", mainContact: { id: "k1" },
         locations: { nodes: locs.slice(0, 250), pageInfo: { hasNextPage: true, endCursor: "c250" } },
         contacts: { nodes: [{ id: "k1", customer: { id: "u1", email: "a@b.co" }, roleAssignments: { nodes: locs.slice(0, 250).map((l) => ({ companyLocation: { id: l.id } })), pageInfo: { hasNextPage: true, endCursor: "r250" } } }] },
         contactRoles: { nodes: [{ id: "role", name: "Location admin" }] },
-      }] } });
+      } });
     }
     if (query.includes("locations(first: 250, after")) {
       const start = variables.after ? 250 : 0;
@@ -297,4 +305,23 @@ test("apply: company with more than 250 sites is paged, so re-runs don't recreat
   assert.equal(r.sitesExisting, 300);
   assert.equal(r.sitesCreated, 0);
   assert.ok(!calls.some((q) => q.includes("companyLocationCreate") || q.includes("companyContactAssignRoles")));
+});
+
+test("state comes from the postcode when the State field is blank or odd", async () => {
+  const { stateFromPostcode } = await import("../src/b2b/address.ts");
+  assert.deepEqual(["2044", "2600", "2620", "3000", "4000", "5000", "6000", "7000", "0800", "2900"].map(stateFromPostcode),
+    ["NSW", "ACT", "NSW", "VIC", "QLD", "SA", "WA", "TAS", "NT", "ACT"]);
+  assert.equal(toShopifyAddress({ StreetAddress: "1 A St", City: "Penrith", Region: "", PostalCode: "2750" }).address?.zoneCode, "NSW");
+  assert.equal(toShopifyAddress({ StreetAddress: "1 A St", City: "Penrith", Region: "N.S.W.", PostalCode: "2750" }).address?.zoneCode, "NSW");
+  const inRegion = toShopifyAddress({ StreetAddress: "1 A St", City: "Sydney", Region: "NSW 2000", PostalCode: "" });
+  assert.deepEqual([inRegion.address?.zip, inRegion.address?.zoneCode], ["2000", "NSW"]);
+  assert.match(toShopifyAddress({ StreetAddress: "1 A St", City: "X", Region: "", PostalCode: "" }).problems.join(), /no postcode.*no state/);
+});
+
+test("skipped sites are listed with their address and reasons are counted", async () => {
+  const { skippedRows, reasonCounts } = await import("../src/b2b/import.ts");
+  const p = planCompany(customer as never, [...sites, { Guid: "s5", AddressName: "No street", City: "Y", PostalCode: "2000" }] as never, 30);
+  const rows = skippedRows(p);
+  assert.ok(rows.some((r) => r[1] === "No street" && /no street address/.test(r[9])));
+  assert.ok(reasonCounts([p]).some(([r]) => r === "no street address"));
 });

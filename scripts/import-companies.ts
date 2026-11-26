@@ -6,7 +6,10 @@
 // Safe to re-run: it only adds what's missing and never deletes. Report: data/import-report.csv
 import { mkdir, readFile, writeFile } from "node:fs/promises";
 import { parseCsvObjects, toCsv } from "../src/b2b/csv.ts";
-import { applyCompany, loadPaymentTermsTemplates, planCompany, REPORT_HEADER, reportRow, type ImportResult } from "../src/b2b/import.ts";
+import {
+  applyCompany, loadPaymentTermsTemplates, planCompany, reasonCounts, REPORT_HEADER, reportRow, SKIPPED_HEADER, skippedRows,
+  type CompanyPlan, type ImportResult,
+} from "../src/b2b/import.ts";
 import { ShopifyAdmin } from "../src/shopify/client.ts";
 import { loadConfig } from "./config.ts";
 
@@ -62,6 +65,7 @@ const templates = await loadPaymentTermsTemplates(admin);
 const ctx = { admin, dryRun: !apply, templates, companyMap };
 
 const results: ImportResult[] = [];
+const plans: CompanyPlan[] = [];
 for (const [i, code] of codes.entries()) {
   const customer = byCode.get(code);
   if (!customer) {
@@ -69,16 +73,25 @@ for (const [i, code] of codes.entries()) {
     continue;
   }
   const plan = planCompany(customer, sitesByCode.get(code), defaultNetDays);
+  plans.push(plan);
   const r = await applyCompany(ctx, plan);
   results.push(r);
   const verb = apply ? r.status : r.status === "created" ? "would create" : r.status === "updated" ? "would update" : r.status;
-  console.log(`[${i + 1}/${codes.length}] ${code}: ${verb}, sites +${r.sitesCreated} (${r.sitesExisting} already there${r.sitesSkipped.length ? `, ${r.sitesSkipped.length} skipped` : ""}), admin ${r.contact || "-"}${r.notes.length ? `\n      ${r.notes.join("\n      ")}` : ""}`);
+  const otherNotes = r.notes.filter((n) => !n.startsWith("Site ")); // per-site detail goes to the skipped-sites file
+  console.log(`[${i + 1}/${codes.length}] ${code}: ${verb}, sites +${r.sitesCreated} (${r.sitesExisting} already there${r.sitesSkipped.length ? `, ${r.sitesSkipped.length} skipped` : ""}), admin ${r.contact || "-"}${otherNotes.length ? `\n      ${otherNotes.join("\n      ")}` : ""}`);
   if (apply) await writeFile(mapPath, JSON.stringify(companyMap, null, 2));
 }
 
 await mkdir("data", { recursive: true });
 const reportPath = apply ? "data/import-report.csv" : "data/import-dry-run.csv";
 await writeFile(reportPath, toCsv([REPORT_HEADER, ...results.map(reportRow)]));
+const skipped = plans.flatMap(skippedRows);
+if (skipped.length) {
+  await writeFile("data/skipped-sites.csv", toCsv([SKIPPED_HEADER, ...skipped]));
+  console.log(`\n${skipped.length} site(s) skipped because of their address. Most common reasons:`);
+  for (const [reason, n] of reasonCounts(plans).slice(0, 6)) console.log(`  ${String(n).padStart(4)}  ${reason}`);
+  console.log("Details (fix these on the customer's Delivery tab in Unleashed, then re-run): data/skipped-sites.csv");
+}
 const count = (s: string) => results.filter((r) => r.status === s).length;
 console.log(`\n${apply ? "Done" : "Dry run done"}: ${count("created")} created, ${count("updated")} updated, ${count("unchanged")} unchanged, ${count("skipped")} skipped, ${count("error")} errors.`);
 console.log(`Report: ${reportPath}`);
