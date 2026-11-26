@@ -7,7 +7,7 @@
 import { mkdir, readFile, writeFile } from "node:fs/promises";
 import { parseCsvObjects, toCsv } from "../src/b2b/csv.ts";
 import {
-  applyCompany, loadPaymentTermsTemplates, planCompany, reasonCounts, REPORT_HEADER, reportRow, SKIPPED_HEADER, skippedRows,
+  applyCompany, findCompany, loadPaymentTermsTemplates, planCompany, planGroup, reasonCounts, REPORT_HEADER, reportRow, SKIPPED_HEADER, skippedRows,
   type CompanyPlan, type ImportResult,
 } from "../src/b2b/import.ts";
 import { ShopifyAdmin } from "../src/shopify/client.ts";
@@ -41,13 +41,25 @@ try {
   console.log(`Can't read ${csvPath}. Run: npm run trade:candidates`);
   process.exit(1);
 }
+// Groups: several Unleashed customers run by one person → one Shopify company (config/company-groups.csv).
+const groups = new Map<string, string[]>();
+try {
+  for (const r of parseCsvObjects(await readFile(process.env.GROUPS_CSV_PATH ?? "config/company-groups.csv", "utf8"))) {
+    const g = r["Group Name"], c = r["Customer Code"];
+    if (g && c) groups.set(g, [...(groups.get(g) ?? []), c]);
+  }
+} catch {}
+const groupOf = new Map<string, string>();
+for (const [g, members] of groups) for (const c of members) groupOf.set(c, g);
+
 if (only) {
-  if (!codes.includes(only)) console.log(`Note: ${only} isn't marked Include = Y in ${csvPath}; importing it anyway because you asked for it.`);
-  codes = [only];
+  const isGroup = groups.has(only) || groupOf.has(only);
+  if (!isGroup && !codes.includes(only)) console.log(`Note: ${only} isn't marked Include = Y in ${csvPath}; importing it anyway because you asked for it.`);
+  codes = groups.has(only) ? [...groups.get(only)!] : [only];
 }
 if (!codes.length) { console.log("No customers marked Include = Y."); process.exit(0); }
 
-console.log(`${apply ? "APPLYING to" : "Dry run against"} ${admin.shopDomain} for ${codes.length} customer(s).${apply ? "" : " Nothing will be changed."}`);
+console.log(`${apply ? "APPLYING to" : "Dry run against"} ${admin.shopDomain} for ${codes.length} customer(s)${groups.size ? ` (${groups.size} group(s) from config/company-groups.csv)` : ""}.${apply ? "" : " Nothing will be changed."}`);
 
 const { client } = loadConfig();
 console.log("Reading customers and delivery addresses from Unleashed…");
@@ -73,19 +85,48 @@ const ctx = { admin, dryRun: !apply, templates, companyMap };
 
 const results: ImportResult[] = [];
 const plans: CompanyPlan[] = [];
-for (const [i, code] of codes.entries()) {
-  const customer = byCode.get(code);
-  if (!customer) {
-    results.push({ code, name: "", status: "error", companyId: "", sitesCreated: 0, sitesExisting: 0, sitesSkipped: [], contact: "", paymentTerms: "", notes: ["not found in Unleashed"] });
+const notFound = (code: string): ImportResult => ({ code, name: "", status: "error", companyId: "", sitesCreated: 0, sitesExisting: 0, sitesSkipped: [], contact: "", paymentTerms: "", notes: ["not found in Unleashed"] });
+
+// Work units: single customers, plus one unit per group that has any member in the list.
+type Unit = { label: string; plan: () => Promise<CompanyPlan | ImportResult> };
+const units: Unit[] = [];
+const doneGroups = new Set<string>();
+for (const code of codes) {
+  const g = groupOf.get(code);
+  if (!g) {
+    units.push({ label: code, plan: async () => {
+      const customer = byCode.get(code);
+      return customer ? planCompany(customer, sitesByCode.get(code), defaultNetDays, lookup) : notFound(code);
+    } });
     continue;
   }
-  const plan = planCompany(customer, sitesByCode.get(code), defaultNetDays, lookup);
+  if (doneGroups.has(g)) continue;
+  doneGroups.add(g);
+  units.push({ label: g, plan: async () => {
+    const members = [];
+    for (const m of groups.get(g)!) {
+      const customer = byCode.get(m);
+      if (!customer) { console.log(`  Group ${g}: ${m} not found in Unleashed, left out`); continue; }
+      // A member imported on its own earlier would keep the admin's email tied up: say so.
+      const solo = await findCompany(ctx, m);
+      if (solo) console.log(`  Group ${g}: ${m} also exists as its own company in Shopify. Delete that company in Shopify admin so the group can use its admin.`);
+      members.push({ code: m, name: (customer.CustomerName ?? m).trim(), plan: planCompany(customer, sitesByCode.get(m), defaultNetDays, lookup) });
+    }
+    return planGroup(g, members);
+  } });
+}
+
+for (const [i, unit] of units.entries()) {
+  const code = unit.label;
+  const planned = await unit.plan();
+  if ("status" in planned) { results.push(planned); continue; }
+  const plan = planned;
   plans.push(plan);
   const r = await applyCompany(ctx, plan);
   results.push(r);
   const verb = apply ? r.status : r.status === "created" ? "would create" : r.status === "updated" ? "would update" : r.status;
   const otherNotes = r.notes.filter((n) => !n.startsWith("Site ")); // per-site detail goes to the skipped-sites file
-  console.log(`[${i + 1}/${codes.length}] ${code}: ${verb}, sites +${r.sitesCreated} (${r.sitesExisting} already there${r.sitesSkipped.length ? `, ${r.sitesSkipped.length} skipped` : ""}), admin ${r.contact || "-"}${otherNotes.length ? `\n      ${otherNotes.join("\n      ")}` : ""}`);
+  console.log(`[${i + 1}/${units.length}] ${code}: ${verb}, sites +${r.sitesCreated} (${r.sitesExisting} already there${r.sitesSkipped.length ? `, ${r.sitesSkipped.length} skipped` : ""}), admin ${r.contact || "-"}${otherNotes.length ? `\n      ${otherNotes.join("\n      ")}` : ""}`);
   if (apply) await writeFile(mapPath, JSON.stringify(companyMap, null, 2));
 }
 

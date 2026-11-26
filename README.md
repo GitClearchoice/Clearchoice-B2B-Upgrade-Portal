@@ -44,6 +44,8 @@ npm run import:companies                          # dry run for everyone marked 
 npm run import:companies -- --apply               # create them all (safe to re-run)
 ```
 
+**Groups:** list customers run by the same person in `config/company-groups.csv` (columns `Group Name`, `Customer Code`). They become one Shopify company; each site keeps its own Unleashed customer code (location metafield `unleashed.customer_code`) so orders still go to the right customer. Delete any member already imported as its own company before running the group. `--only "Group Name"` imports one group.
+
 Reports: `data/import-dry-run.csv` / `data/import-report.csv`. The import never deletes or overwrites; re-running adds only what's missing (new sites, a missing admin).
 
 Shopify setup: in the Dev Dashboard app, add the scopes `write_companies`, `write_customers`, `read_payment_terms`, release a new version and reinstall it on the dev store. Put `SHOPIFY_SHOP`, `SHOPIFY_CLIENT_ID`, `SHOPIFY_CLIENT_SECRET` in `.env`.

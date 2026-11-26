@@ -43,6 +43,8 @@ Upload this file to the new Claude project, then start a chat with:
 2. `npm run trade:candidates` → review `data/trade-customers.csv`.
 3. `npm run import:companies -- --only "CODE"` (dry run), then `--apply` for one, check in Shopify admin, then all.
 
+**Phase 2 run (26 Nov):** 58 companies imported on the dev store, ~1,460 sites. Fixes along the way: spaces not allowed in Shopify external IDs (→ `_`); no "due on receipt" terms for B2B locations (Prepaid/Same Day get none); one email can only be a contact for one company. Decisions: HealthShare NSW + SLHD → HealthShare NSW Group (SLHD has moved under HealthShare); CMMD + Grimesquad + Fit Services Syd → FIT Services Group; Ecomist Eastern Suburbs keeps no admin (shares Ecomist City West's email, unlikely to use the portal). 7 customers still have no usable address in Unleashed (Palpa, SKL, Essence Clean, Eastern Suburbs Cleaning Group, ABI Australia, Chief Capital Corp, MKD Clean). Skipped sites are listed in `data/skipped-sites.csv` for cleanup in Unleashed; re-running the import adds any fixed ones.
+
 **Phase 3 next:** scaffold the Shopify app (Shopify CLI, React Router) on Render with Postgres (prisma/schema.prisma), price display + "Place order". Before then, copy the live theme and a few hundred products (SKUs = Unleashed codes) into the dev store.
 
 ---
@@ -58,6 +60,8 @@ Pricing order, mirroring Unleashed:
 
 ## Shopify data model
 - **Company** = Unleashed customer. `company.externalId` = Unleashed Customer Code with spaces turned into `_` (Shopify doesn't allow spaces); the **exact** code is in company metafield `unleashed.customer_code`. Use the metafield when sending orders to Unleashed.
+- **Groups** (`config/company-groups.csv`): several Unleashed customers run by one person become **one** Shopify company (`externalId` = `GROUP:<name>`, metafield `unleashed.group_members`). Each site is named "<member> - <site>" and carries its own Unleashed code in **location** metafield `unleashed.customer_code`, plus that member's payment terms. First group: **FIT Services Group** = CMMD, GRIMESQUAD PTY LTD, FIT SERVICES SYD (same admin email, payables@fitservices.com.au; Shopify allows a person to be a contact for only one company).
+- **Which Unleashed customer an order goes to:** the site's `unleashed.customer_code` location metafield if present, else the company's `unleashed.customer_code`.
 - **Company location** = delivery site from the customer's Unleashed Delivery tab (`externalId` = Unleashed address Guid; its own address, net terms from the Unleashed payment term).
 - **Head-office admin** = Unleashed primary contact → company main contact, Location admin on every site, and company metafield `b2b.budget_admin_contact` = the contact's GID.
 - **Budgets** = metaobject `site_budget` {location, year, month, amount_ex_gst}, plus a default monthly amount per location.

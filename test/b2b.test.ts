@@ -419,3 +419,63 @@ test("external IDs: spaces become underscores; exact code saved in a metafield",
   const metas = calls.filter((c) => c.query.includes("metafieldsSet")).flatMap((c) => c.variables.m as any[]);
   assert.ok(metas.some((m) => m.namespace === "unleashed" && m.key === "customer_code" && m.value === "ASSET LINK"));
 });
+
+test("a site Shopify rejects is skipped; the rest of the customer carries on", async () => {
+  let n = 0;
+  const { admin } = fakeShopify();
+  const orig = admin.graphql.bind(admin);
+  admin.graphql = (async (q: string, v: Record<string, unknown>) => {
+    if (q.includes("companyLocationCreate") && n++ === 0) {
+      return { companyLocationCreate: { companyLocation: null, userErrors: [{ field: ["input", "shippingAddress", "zip"], message: "Zip is invalid" }] } };
+    }
+    return orig(q, v);
+  }) as typeof admin.graphql;
+  const plan = planCompany(customer as never, [...sites, { Guid: "s6", AddressName: "Third", StreetAddress: "3 Test St", City: "Sydney", Region: "NSW", PostalCode: "2000" }] as never, 30);
+  const r = await applyCompany(ctxFor(admin, false), plan);
+  assert.equal(r.status, "created", r.notes.join());
+  assert.equal(r.sitesCreated, 2); // first (with company) + third; second rejected
+  assert.match(r.sitesSkipped.join(), /Hospital: Shopify rejected it: Zip is invalid/);
+  assert.ok(plan.skippedSites.some((s) => /Zip is invalid/.test(s.reason)));
+  assert.match(r.contact, /added/);
+});
+
+test("an admin who is already a contact for another company is noted, not an error", async () => {
+  const { admin } = fakeShopify(null, { id: "gid://shopify/Customer/9", email: "jo@assetlink.example" });
+  const orig = admin.graphql.bind(admin);
+  admin.graphql = (async (q: string, v: Record<string, unknown>) => {
+    if (q.includes("companyAssignCustomerAsContact")) {
+      return { companyAssignCustomerAsContact: { companyContact: null, userErrors: [{ field: ["companyId"], message: "Customer is already associated with a company contact." }] } };
+    }
+    return orig(q, v);
+  }) as typeof admin.graphql;
+  const r = await applyCompany(ctxFor(admin, false), planCompany(customer as never, sites as never, 30));
+  assert.equal(r.status, "created", r.notes.join());
+  assert.match(r.contact, /not set: .* already the admin for another company/);
+  assert.match(r.notes.join(), /different primary contact in Unleashed/);
+});
+
+test("group: one company, sites named by member, each site keeps its own Unleashed code and terms", async () => {
+  const { planGroup } = await import("../src/b2b/import.ts");
+  const a = planCompany({ ...customer, CustomerCode: "CMMD", CustomerName: "CMMD", PaymentTerm: "30 Days" } as never, [sites[0]] as never, 30);
+  const b = planCompany({ ...customer, CustomerCode: "GRIMESQUAD PTY LTD", CustomerName: "Grimesquad", PaymentTerm: "14 Days" } as never, [sites[1]] as never, 30);
+  const g = planGroup("FIT Services Group", [{ code: "CMMD", name: "CMMD", plan: a }, { code: "GRIMESQUAD PTY LTD", name: "Grimesquad", plan: b }]);
+  assert.equal(g.code, "GROUP:FIT Services Group");
+  assert.deepEqual(g.sites.map((s) => [s.name, s.customerCode, s.netDays]), [
+    ["CMMD - Western Sydney", "CMMD", 30],
+    ["Grimesquad - Hospital", "GRIMESQUAD PTY LTD", 14],
+  ]);
+
+  const { admin, calls } = fakeShopify();
+  const t = [...templates, { id: "net15", name: "Net 15", paymentTermsType: "NET", dueInDays: 15 }];
+  const r = await applyCompany({ admin, dryRun: false, templates: t, companyMap: {} }, g);
+  assert.equal(r.status, "created", r.notes.join());
+  const create = calls.find((c) => c.query.includes("companyCreate"))!;
+  assert.equal((create.variables.input as any).company.externalId, "GROUP:FIT_Services_Group");
+  assert.equal((create.variables.input as any).company.name, "FIT Services Group");
+  const loc2 = calls.find((c) => c.query.includes("companyLocationCreate"))!;
+  assert.equal((loc2.variables.input as any).buyerExperienceConfiguration.paymentTermsTemplateId, "net15");
+  const metas = calls.filter((c) => c.query.includes("metafieldsSet")).flatMap((c) => c.variables.m as any[]);
+  assert.ok(metas.some((m) => m.key === "group_members" && m.value === "CMMD; GRIMESQUAD PTY LTD"));
+  const siteCodes = metas.filter((m) => m.namespace === "unleashed" && m.key === "customer_code").map((m) => m.value).sort();
+  assert.deepEqual(siteCodes, ["CMMD", "GRIMESQUAD PTY LTD"]);
+});

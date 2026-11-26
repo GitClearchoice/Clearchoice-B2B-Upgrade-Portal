@@ -12,6 +12,10 @@ export interface PlannedSite {
   name: string;
   address: ShopifyAddress;
   note?: string;
+  /** Unleashed customer this site belongs to (differs per site in a group company). */
+  customerCode?: string;
+  /** Payment terms for this site's customer, when it differs from the company's. */
+  netDays?: number;
 }
 
 export interface SkippedSite {
@@ -21,7 +25,10 @@ export interface SkippedSite {
 }
 
 export interface CompanyPlan {
+  /** Unleashed customer code, or "GROUP:<name>" for a group company. */
   code: string;
+  /** For a group company: the Unleashed customer codes it combines. */
+  members?: string[];
   name: string;
   contact: { firstName: string; lastName: string; email: string } | null;
   sites: PlannedSite[];
@@ -123,6 +130,39 @@ export function planCompany(
   if (note) notes.push(note);
 
   return { code, name, contact, sites, skippedSites, unleashedPaymentTerm: (customer.PaymentTerm ?? "").trim(), netDays: days, notes };
+}
+
+/**
+ * Several Unleashed customers run by the same person become one Shopify company. Each site keeps
+ * its own Unleashed customer code (and payment terms), so orders still go to the right customer.
+ */
+export function planGroup(groupName: string, members: { code: string; name: string; plan: CompanyPlan }[]): CompanyPlan {
+  const sites: PlannedSite[] = [];
+  const skippedSites: SkippedSite[] = [];
+  const notes: string[] = [`group of ${members.map((m) => m.code).join(", ")}`];
+  for (const m of members) {
+    for (const s of m.plan.sites) {
+      let name = `${m.name} - ${s.name}`;
+      for (let i = 2; sites.some((x) => x.name === name); i++) name = `${m.name} - ${s.name} (${i})`;
+      sites.push({ ...s, name, customerCode: m.code, netDays: m.plan.netDays });
+    }
+    skippedSites.push(...m.plan.skippedSites.map((s) => ({ ...s, name: `${m.name} - ${s.name}` })));
+    notes.push(...m.plan.notes.map((n) => `${m.code}: ${n}`));
+  }
+  const contact = members.map((m) => m.plan.contact).find(Boolean) ?? null;
+  const emails = new Set(members.map((m) => m.plan.contact?.email.toLowerCase()).filter(Boolean));
+  if (emails.size > 1) notes.push(`members have different primary contacts; using ${contact?.email} as the group's admin`);
+  return {
+    code: `GROUP:${groupName}`,
+    members: members.map((m) => m.code),
+    name: groupName,
+    contact,
+    sites,
+    skippedSites,
+    unleashedPaymentTerm: members[0]?.plan.unleashedPaymentTerm ?? "",
+    netDays: members[0]?.plan.netDays ?? 30,
+    notes,
+  };
 }
 
 // ---------------------------------------------------------------------------------------------
@@ -268,6 +308,11 @@ export function pickTemplate(templates: PaymentTermsTemplate[], days: number): {
   return { template: nearest, note: `Shopify has no Net ${days}; used ${nearest.name}` };
 }
 
+function siteTemplateId(ctx: ImportContext, site: PlannedSite, fallback: string | undefined): string | undefined {
+  if (site.netDays === undefined) return fallback;
+  return pickTemplate(ctx.templates, site.netDays).template?.id;
+}
+
 function locationInput(site: PlannedSite, templateId: string | undefined) {
   return {
     name: site.name,
@@ -299,6 +344,7 @@ export async function applyCompany(ctx: ImportContext, plan: CompanyPlan): Promi
   try {
     let company = await findCompany(ctx, plan.code);
     let changed = false;
+    const newSiteCodes: { id: string; code: string }[] = [];
 
     // 1. Company (created with its first site)
     if (!company) {
@@ -312,7 +358,7 @@ export async function applyCompany(ctx: ImportContext, plan: CompanyPlan): Promi
           {
             input: {
               company: { name: plan.name, externalId: shopifyExternalId(plan.code), note: `Unleashed customer ${plan.code}` },
-              companyLocation: locationInput(first, template?.id),
+              companyLocation: locationInput(first, siteTemplateId(ctx, first, template?.id)),
             },
           },
         );
@@ -322,12 +368,20 @@ export async function applyCompany(ctx: ImportContext, plan: CompanyPlan): Promi
       result.status = "created";
       result.sitesCreated++;
       changed = true;
+      const firstLoc = company.locations.find((l) => l.externalId === shopifyExternalId(first.externalId));
+      if (firstLoc) newSiteCodes.push({ id: firstLoc.id, code: first.customerCode ?? plan.code });
     }
     result.companyId = company.id;
     if (!dry) {
       const r = await ctx.admin.graphql<{ metafieldsSet: { userErrors: UserError[] } }>(
         `mutation($m: [MetafieldsSetInput!]!) { metafieldsSet(metafields: $m) { userErrors { field message code } } }`,
-        { m: [{ ownerId: company.id, namespace: "unleashed", key: "customer_code", type: "single_line_text_field", value: plan.code }] },
+        {
+          m: [
+            plan.members
+              ? { ownerId: company.id, namespace: "unleashed", key: "group_members", type: "single_line_text_field", value: plan.members.join("; ") }
+              : { ownerId: company.id, namespace: "unleashed", key: "customer_code", type: "single_line_text_field", value: plan.code },
+          ],
+        },
       );
       assertNoUserErrors(`Saving Unleashed code for ${plan.code}`, r.metafieldsSet.userErrors);
     }
@@ -345,15 +399,38 @@ export async function applyCompany(ctx: ImportContext, plan: CompanyPlan): Promi
       else {
         const r = await ctx.admin.graphql<{ companyLocationCreate: { companyLocation: { id: string } | null; userErrors: UserError[] } }>(
           `mutation($companyId: ID!, $input: CompanyLocationInput!) { companyLocationCreate(companyId: $companyId, input: $input) { companyLocation { id } userErrors { field message code } } }`,
-          { companyId: company.id, input: locationInput(site, template?.id) },
+          { companyId: company.id, input: locationInput(site, siteTemplateId(ctx, site, template?.id)) },
         );
-        assertNoUserErrors(`Creating site "${site.name}" for ${plan.code}`, r.companyLocationCreate.userErrors);
-        id = r.companyLocationCreate.companyLocation!.id;
+        const errs = r.companyLocationCreate.userErrors;
+        if (errs?.length || !r.companyLocationCreate.companyLocation) {
+          // One bad site (e.g. a postcode Shopify won't accept) shouldn't stop the rest of the customer.
+          const why = `Shopify rejected it: ${(errs ?? []).map((e) => e.message).join("; ") || "unknown error"}`;
+          result.sitesSkipped.push(`${site.name}: ${why}`);
+          plan.skippedSites.push({
+            name: site.name,
+            reason: why,
+            address: { StreetAddress: site.address.address1, StreetAddress2: site.address.address2, City: site.address.city, Region: site.address.zoneCode, PostalCode: site.address.zip, Country: site.address.countryCode },
+          });
+          continue;
+        }
+        id = r.companyLocationCreate.companyLocation.id;
       }
       company.locations.push({ id, externalId: shopifyExternalId(site.externalId), name: site.name });
       byExt.set(shopifyExternalId(site.externalId), company.locations[company.locations.length - 1]);
       result.sitesCreated++;
       changed = true;
+      newSiteCodes.push({ id, code: site.customerCode ?? plan.code });
+    }
+
+    // Each new site records its Unleashed customer code (orders are sent to Unleashed using it).
+    if (!dry) {
+      for (let i = 0; i < newSiteCodes.length; i += 25) {
+        const r = await ctx.admin.graphql<{ metafieldsSet: { userErrors: UserError[] } }>(
+          `mutation($m: [MetafieldsSetInput!]!) { metafieldsSet(metafields: $m) { userErrors { field message code } } }`,
+          { m: newSiteCodes.slice(i, i + 25).map((s) => ({ ownerId: s.id, namespace: "unleashed", key: "customer_code", type: "single_line_text_field", value: s.code })) },
+        );
+        assertNoUserErrors(`Saving Unleashed codes on sites of ${plan.code}`, r.metafieldsSet.userErrors);
+      }
     }
 
     // 3. Head-office admin = Unleashed primary contact
@@ -362,15 +439,33 @@ export async function applyCompany(ctx: ImportContext, plan: CompanyPlan): Promi
       let contact = company.contacts.find((c) => (c.email ?? "").toLowerCase() === email);
       if (contact) result.contact = `existing (${plan.contact.email})`;
       else {
-        let contactId: string;
+        let contactId: string | null = null;
         if (dry) contactId = fakeId("contact", email);
-        else contactId = await createOrAttachContact(ctx, company.id, plan.contact);
-        contact = { id: contactId, email, customerId: null, locationIdsWithRole: [] };
-        company.contacts.push(contact);
-        result.contact = `added (${plan.contact.email})`;
-        changed = true;
+        else {
+          try {
+            contactId = await createOrAttachContact(ctx, company.id, plan.contact);
+          } catch (e) {
+            // Shopify: one person can be a contact for only one company.
+            if (!/already associated with a company contact/i.test((e as Error).message)) throw e;
+            result.contact = `not set: ${plan.contact.email} is already the admin for another company`;
+            result.notes.push(
+              `head-office admin not set: ${plan.contact.email} is already a contact for another company, and Shopify allows only one. Give this customer a different primary contact in Unleashed and re-run.`,
+            );
+          }
+        }
+        if (contactId) {
+          contact = { id: contactId, email, customerId: null, locationIdsWithRole: [] };
+          company.contacts.push(contact);
+          result.contact = `added (${plan.contact.email})`;
+          changed = true;
+        }
       }
+    }
 
+    // Admin roles, main contact and budget flag (only when there is an admin).
+    const contactEmail = plan.contact?.email.toLowerCase();
+    const contact = contactEmail ? company.contacts.find((c) => (c.email ?? "").toLowerCase() === contactEmail) : undefined;
+    if (plan.contact && contact) {
       if (company.mainContact?.id !== contact.id) {
         if (!dry) {
           const r = await ctx.admin.graphql<{ companyAssignMainContact: { userErrors: UserError[] } }>(
@@ -408,7 +503,7 @@ export async function applyCompany(ctx: ImportContext, plan: CompanyPlan): Promi
         );
         assertNoUserErrors(`Flagging budget admin for ${plan.code}`, r.metafieldsSet.userErrors);
       }
-    } else {
+    } else if (!plan.contact) {
       result.contact = "none";
     }
 
