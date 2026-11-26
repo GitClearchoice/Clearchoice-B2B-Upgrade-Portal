@@ -30,8 +30,8 @@ const qty = Number(opt("qty", "2"));
 const po = opt("po", `TEST-PO-${new Date().toISOString().slice(0, 10)}`);
 
 const status = process.env.UNLEASHED_ORDER_STATUS ?? "Parked";
-const warehouseName = process.env.UNLEASHED_WAREHOUSE ?? "Clearchoice Warehouse";
-const taxCode = process.env.UNLEASHED_TAX_CODE ?? "G.S.T.";
+const warehouseName = process.env.UNLEASHED_WAREHOUSE ?? "Clearchoice Factory";
+const taxCode = process.env.UNLEASHED_TAX_CODE ?? "GST on Income";
 const taxRate = Number(process.env.UNLEASHED_TAX_RATE ?? 0.1);
 
 const { client, snapshotPath } = loadConfig();
@@ -45,14 +45,15 @@ if (!warehouse) {
   console.log("Set UNLEASHED_WAREHOUSE in .env to one of these names.");
   process.exit(1);
 }
-const tax = taxes.find((t) => t.TaxCode === taxCode);
+const norm = (s: string | null | undefined) => (s ?? "").trim().toLowerCase();
+const tax = taxes.find((t) => t.TaxCode === taxCode) ?? taxes.find((t) => norm(t.TaxCode) === norm(taxCode) || norm(t.Description) === norm(taxCode));
 if (!tax) {
-  console.log(`Tax code "${taxCode}" not found. Unleashed has: ${taxes.map((t) => `"${t.TaxCode}" (${t.TaxRate})`).join(", ")}`);
+  console.log(`Tax "${taxCode}" not found. Unleashed has: ${taxes.map((t) => `"${t.TaxCode}"${t.Description ? ` / "${t.Description}"` : ""} (${t.TaxRate})`).join(", ")}`);
   console.log("Set UNLEASHED_TAX_CODE in .env to the exact code.");
   process.exit(1);
 }
 if (Math.abs(tax.TaxRate - taxRate) > 1e-9) console.log(`Note: Unleashed says ${taxCode} is ${tax.TaxRate}; .env says ${taxRate}. Using ${tax.TaxRate}.`);
-console.log(`Warehouse: ${warehouse.WarehouseName} (${warehouse.WarehouseCode}). Tax: ${tax.TaxCode} at ${tax.TaxRate}.`);
+console.log(`Warehouse: ${warehouse.WarehouseName} (${warehouse.WarehouseCode}). Tax: ${tax.TaxCode}${tax.Description && tax.Description !== tax.TaxCode ? ` ("${tax.Description}")` : ""} at ${tax.TaxRate}.`);
 
 // 2. The site, from the customer's Delivery tab (same address rules as the Shopify import).
 const [delivery, customers] = await Promise.all([client.customerDeliveryAddresses({ customerCode }), client.customers()]);

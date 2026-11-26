@@ -1,5 +1,5 @@
 // Builds the Unleashed sales order for a trade order (POST /SalesOrders/{guid}).
-// Decisions (handover, 26 Nov): status Parked, warehouse Clearchoice Warehouse, tax G.S.T. at 0.1,
+// Decisions (handover, 26 Nov): status Parked, warehouse Clearchoice Factory (W1), tax G.S.T. at 0.1,
 // PO number → CustomerRef, site name → DeliveryName.
 import type { ShopifyAddress } from "../b2b/address.ts";
 import type { ResolvedPrice } from "../pricing/types.ts";
@@ -67,7 +67,7 @@ export function buildSalesOrder(o: TradeOrderInput) {
     DeliveryStreetAddress: a.address1,
     DeliveryStreetAddress2: a.address2 ?? "",
     DeliverySuburb: a.city,
-    DeliveryCity: a.city,
+    DeliveryCity: "", // Clearchoice: suburb only; City left blank (26 Nov)
     DeliveryRegion: a.zoneCode ?? "",
     DeliveryCountry: COUNTRY_NAMES[a.countryCode] ?? a.countryCode,
     DeliveryPostCode: a.zip ?? "",

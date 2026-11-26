@@ -45,6 +45,8 @@ Upload this file to the new Claude project, then start a chat with:
 
 **Phase 2 — complete (26 Nov).** Final run: 0 errors; 63 customers imported as 59 Shopify companies (3 groups) on the dev store, ~1,460 sites. Fixes along the way: spaces not allowed in Shopify external IDs (→ `_`); no "due on receipt" terms for B2B locations (Prepaid/Same Day get none); one email can only be a contact for one company. Decisions: HealthShare NSW + SLHD → HealthShare NSW Group (SLHD has moved under HealthShare); CMMD + Grimesquad + Fit Services Syd → FIT Services Group; Ecomist City West + Ecomist Eastern Suburbs → Ecomist Group. Rule of thumb: customers sharing an admin email are one person running several accounts → group them. 7 customers still have no usable address in Unleashed (Palpa, SKL, Essence Clean, Eastern Suburbs Cleaning Group, ABI Australia, Chief Capital Corp, MKD Clean). Skipped sites are listed in `data/skipped-sites.csv` for cleanup in Unleashed; re-running the import adds any fixed ones.
 
+**Phase 3, step 1 — done (26 Nov).** `npm run order:test` sent a Parked test order for Assetlink (Westpoint Blacktown) straight to the Unleashed sandbox: it landed under the right customer. Corrections from checking it: tax should be GST on Income; City left blank. Re-test after the fix.
+
 **Phase 3 next:** scaffold the Shopify app (Shopify CLI, React Router) on Render with Postgres (prisma/schema.prisma), price display + "Place order". Before then, copy the live theme and a few hundred products (SKUs = Unleashed codes) into the dev store.
 
 ---
@@ -90,7 +92,7 @@ Pricing order, mirroring Unleashed:
       - `DeliveryName` = company location name; delivery street/suburb/city/region/postcode/country = the location's shipping address.
       - Lines: `Product.ProductCode` = SKU, `OrderQuantity`, `UnitPrice` ex GST, `LineTotal`, `LineTax` (10% GST on taxable products).
       - `SubTotal` / `TaxTotal` / `Total` (sum of lines; Total = SubTotal + TaxTotal), `Tax`/`TaxRate`, `ExchangeRate` = 1.
-      - `OrderStatus` = **Parked**; `Warehouse` = **Clearchoice Warehouse**; tax code **G.S.T.** at rate **0.1** (decided 26 Nov). Tax code kept in a setting and checked against Unleashed's tax list on first use.
+      - `OrderStatus` = **Parked**; `Warehouse` = **Clearchoice Factory**; tax **GST on Income** at rate **0.1** (corrected 26 Nov after the first test order; was G.S.T.). Tax kept in a setting and checked against Unleashed's tax list (code or description) before sending. Delivery suburb goes in `DeliverySuburb`; `DeliveryCity` left blank.
       - `Comments`: Shopify draft name, buyer name and email.
       - The app generates the order's Guid and saves it **before** posting, so a retry can never create a duplicate.
       - If Unleashed rejects or is down: the draft is tagged `unleashed-failed`, the order is retried automatically, and Clearchoice staff are emailed. The buyer still sees "order received".

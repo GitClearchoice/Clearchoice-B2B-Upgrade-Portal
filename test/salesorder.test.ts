@@ -14,7 +14,7 @@ const base = {
   customerCode: "ASSETLINKSERVICESPTYLTD",
   poNumber: " PO-123 ",
   site: { name: "Western Sydney International Airport", address: { address1: "100 Eaton Rd", city: "Badgerys Creek", zoneCode: "NSW", zip: "2555", countryCode: "AU" } },
-  warehouse: { Guid: "w1", WarehouseCode: "CCW", WarehouseName: "Clearchoice Warehouse" },
+  warehouse: { Guid: "w1", WarehouseCode: "CCW", WarehouseName: "Clearchoice Factory" },
   taxCode: "G.S.T.", taxRate: 0.1, status: "Parked",
   orderDate: new Date("2026-11-26T00:00:00Z"),
 };
@@ -24,9 +24,9 @@ test("sales order: customer, PO as Customer Reference, site as delivery name, Pa
   assert.equal(o.Customer.CustomerCode, "ASSETLINKSERVICESPTYLTD");
   assert.equal(o.CustomerRef, "PO-123");
   assert.equal(o.DeliveryName, "Western Sydney International Airport");
-  assert.deepEqual([o.DeliveryStreetAddress, o.DeliverySuburb, o.DeliveryRegion, o.DeliveryPostCode, o.DeliveryCountry], ["100 Eaton Rd", "Badgerys Creek", "NSW", "2555", "Australia"]);
+  assert.deepEqual([o.DeliveryStreetAddress, o.DeliverySuburb, o.DeliveryCity, o.DeliveryRegion, o.DeliveryPostCode, o.DeliveryCountry], ["100 Eaton Rd", "Badgerys Creek", "", "NSW", "2555", "Australia"]);
   assert.equal(o.OrderStatus, "Parked");
-  assert.equal(o.Warehouse.WarehouseName, "Clearchoice Warehouse");
+  assert.equal(o.Warehouse.WarehouseName, "Clearchoice Factory");
   assert.deepEqual(o.Tax, { TaxCode: "G.S.T." });
   assert.equal(o.TaxRate, 0.1);
   assert.equal(o.ExchangeRate, 1);
