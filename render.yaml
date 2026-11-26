@@ -44,7 +44,7 @@ services:
       - key: SHOPIFY_APP_URL
         sync: false
       - key: SCOPES
-        value: read_products,write_draft_orders,write_companies,write_customers,read_payment_terms
+        value: read_products,write_draft_orders,write_companies,write_customers,read_payment_terms,write_app_proxy
 
   # 2:00am Sydney in summer (AEDT), 1:00am in winter. Render cron times are UTC.
   - type: cron

@@ -11,7 +11,7 @@ automatically_update_urls_on_dev = true
 include_config_on_deploy = true
 
 [access_scopes]
-scopes = "read_products,write_draft_orders,write_companies,write_customers,read_payment_terms"
+scopes = "read_products,write_draft_orders,write_companies,write_customers,read_payment_terms,write_app_proxy"
 
 [auth]
 redirect_urls = ["https://clearchoice-b2b.onrender.com/auth/callback"]
