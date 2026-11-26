@@ -64,3 +64,13 @@ test("client POST: signs the empty query string, sends JSON, doesn't retry a 500
   assert.equal(calls[0].init.body, JSON.stringify({ a: 1 }));
   assert.equal((calls[0].init.headers as Record<string, string>)["api-auth-signature"], signQuery("", "key"));
 });
+
+test("delivery instructions: site note + buyer note, no blanks or repeats", async () => {
+  const { deliveryInstructionFor } = await import("../src/unleashed/salesOrder.ts");
+  assert.equal(deliveryInstructionFor("Dock 2 | Jo 0400 000 000 | Dock 2", "Leave at reception"), "Leave at reception | Dock 2 | Jo 0400 000 000");
+  assert.equal(deliveryInstructionFor("", ""), undefined);
+  const o = buildSalesOrder({ ...base, lines: [line("A", 1, 1)], taxable: () => true, deliveryInstruction: "Dock 2" });
+  assert.equal(o.DeliveryInstruction, "Dock 2");
+  const none = buildSalesOrder({ ...base, lines: [line("A", 1, 1)], taxable: () => true });
+  assert.ok(!("DeliveryInstruction" in none));
+});

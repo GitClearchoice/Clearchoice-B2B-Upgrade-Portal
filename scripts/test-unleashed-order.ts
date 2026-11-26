@@ -7,6 +7,7 @@
 //   --sku CODE        [1-CT-0014]
 //   --qty N           [2]
 //   --po TEXT         [TEST-PO-<date>]
+//   --note "TEXT"     buyer's delivery note, added to the site's instructions
 // Prices come from the last sync (npm run sync), the same way the portal will price orders.
 import { randomUUID } from "node:crypto";
 import { mkdir, readFile, writeFile } from "node:fs/promises";
@@ -14,7 +15,7 @@ import { FileStore } from "../src/sync/store.ts";
 import { priceLines } from "../src/index.ts";
 import { siteName, toShopifyAddress, PostcodeLookup } from "../src/b2b/address.ts";
 import { activeDeliveryAddresses } from "../src/b2b/candidates.ts";
-import { buildSalesOrder } from "../src/unleashed/salesOrder.ts";
+import { buildSalesOrder, deliveryInstructionFor } from "../src/unleashed/salesOrder.ts";
 import { loadConfig } from "./config.ts";
 
 const args = process.argv.slice(2);
@@ -28,10 +29,11 @@ const siteSearch = opt("site", "Western Sydney International");
 const sku = opt("sku", "1-CT-0014");
 const qty = Number(opt("qty", "2"));
 const po = opt("po", `TEST-PO-${new Date().toISOString().slice(0, 10)}`);
+const buyerNote = opt("note", "");
 
 const status = process.env.UNLEASHED_ORDER_STATUS ?? "Parked";
 const warehouseName = process.env.UNLEASHED_WAREHOUSE ?? "Clearchoice Factory";
-const taxCode = process.env.UNLEASHED_TAX_CODE ?? "GST on Income";
+const taxCode = process.env.UNLEASHED_TAX_CODE ?? "OUTPUT"; // "GST on Income (10%)" in Unleashed
 const taxRate = Number(process.env.UNLEASHED_TAX_RATE ?? 0.1);
 
 const { client, snapshotPath } = loadConfig();
@@ -98,12 +100,15 @@ const order = buildSalesOrder({
   taxRate: tax.TaxRate,
   status,
   comments: "TEST order from the B2B portal build. Safe to delete.",
+  // Same text the import put in the Shopify site note: Unleashed delivery instruction + contacts found in the address.
+  deliveryInstruction: deliveryInstructionFor([siteAddr.DeliveryInstruction?.trim(), mapped.extraNote].filter(Boolean).join(" | "), buyerNote),
 });
 
 console.log(`\nCustomer:      ${customerCode}`);
 console.log(`Delivery name: ${order.DeliveryName}`);
 console.log(`Deliver to:    ${[order.DeliveryStreetAddress, order.DeliveryStreetAddress2, order.DeliverySuburb, order.DeliveryRegion, order.DeliveryPostCode].filter(Boolean).join(", ")}`);
 console.log(`Customer Ref:  ${order.CustomerRef}`);
+console.log(`Instructions:  ${order.DeliveryInstruction ?? "(none)"}`);
 for (const l of order.SalesOrderLines) console.log(`Line:          ${l.Product.ProductCode} x${l.OrderQuantity} @ $${l.UnitPrice.toFixed(2)} = $${l.LineTotal.toFixed(2)} + GST $${l.LineTax.toFixed(2)}`);
 console.log(`Totals:        $${order.SubTotal.toFixed(2)} + GST $${order.TaxTotal.toFixed(2)} = $${order.Total.toFixed(2)}`);
 console.log(`Status:        ${order.OrderStatus}, warehouse ${order.Warehouse.WarehouseName}`);

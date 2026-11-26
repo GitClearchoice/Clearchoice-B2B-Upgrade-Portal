@@ -19,7 +19,19 @@ export interface TradeOrderInput {
   taxRate: number;
   status: string;
   comments?: string;
+  /** Site delivery instructions + contacts (from the site's note), plus the buyer's note from the order form. */
+  deliveryInstruction?: string;
   orderDate?: Date;
+}
+
+/** Joins the site's instructions and the buyer's note, dropping blanks and repeats. */
+export function deliveryInstructionFor(siteNote: string | undefined, buyerNote?: string): string | undefined {
+  const parts = [buyerNote, siteNote]
+    .flatMap((s) => (s ?? "").split(/\s*\|\s*|\n/))
+    .map((s) => s.trim())
+    .filter(Boolean);
+  const unique = [...new Set(parts)];
+  return unique.length ? unique.join(" | ").slice(0, 1000) : undefined;
 }
 
 const COUNTRY_NAMES: Record<string, string> = { AU: "Australia", NZ: "New Zealand" };
@@ -71,6 +83,7 @@ export function buildSalesOrder(o: TradeOrderInput) {
     DeliveryRegion: a.zoneCode ?? "",
     DeliveryCountry: COUNTRY_NAMES[a.countryCode] ?? a.countryCode,
     DeliveryPostCode: a.zip ?? "",
+    ...(o.deliveryInstruction ? { DeliveryInstruction: o.deliveryInstruction } : {}),
     SalesOrderLines,
     SubTotal: money(subC),
     TaxTotal: money(taxC),
