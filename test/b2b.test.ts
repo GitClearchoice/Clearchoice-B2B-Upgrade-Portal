@@ -247,3 +247,54 @@ test("shopify client: token via client credentials, sent as header, cached", asy
   assert.equal(seen[1].url, "https://clearchoice-upgrade.myshopify.com/admin/api/2026-10/graphql.json");
   assert.equal(seen[1].headers!["X-Shopify-Access-Token"], "abc");
 });
+
+test("Prepaid / Same Day map to due on receipt; month-following uses the default", () => {
+  assert.equal(parseNetDays("Prepaid", 30).days, 0);
+  assert.equal(parseNetDays("Same Day", 30).days, 0);
+  assert.equal(parseNetDays("30th Month following", 30).days, 30); // "30th" isn't "30 days"
+  const t = [{ id: "r", name: "Due on receipt", paymentTermsType: "RECEIPT", dueInDays: null }, { id: "n30", name: "Net 30", paymentTermsType: "NET", dueInDays: 30 }];
+  assert.equal(pickTemplate(t, 0).template?.id, "r");
+  assert.equal(pickTemplate(t, 30).template?.id, "n30");
+});
+
+test("apply: company with more than 250 sites is paged, so re-runs don't recreate sites", async () => {
+  const calls: string[] = [];
+  const locs = Array.from({ length: 300 }, (_, i) => ({ id: `loc-${i}`, externalId: `s${i}`, name: `Site ${i}` }));
+  const fn = (async (url: string, init?: RequestInit) => {
+    if (url.endsWith("/access_token")) return new Response(JSON.stringify({ access_token: "t" }));
+    const { query, variables } = JSON.parse(String(init!.body));
+    calls.push(query);
+    const reply = (data: unknown) => new Response(JSON.stringify({ data }));
+    if (query.includes("companies(")) {
+      return reply({ companies: { nodes: [{
+        id: "C1", externalId: "BIG", mainContact: { id: "k1" },
+        locations: { nodes: locs.slice(0, 250), pageInfo: { hasNextPage: true, endCursor: "c250" } },
+        contacts: { nodes: [{ id: "k1", customer: { id: "u1", email: "a@b.co" }, roleAssignments: { nodes: locs.slice(0, 250).map((l) => ({ companyLocation: { id: l.id } })), pageInfo: { hasNextPage: true, endCursor: "r250" } } }] },
+        contactRoles: { nodes: [{ id: "role", name: "Location admin" }] },
+      }] } });
+    }
+    if (query.includes("locations(first: 250, after")) {
+      const start = variables.after ? 250 : 0;
+      const nodes = locs.slice(start, start + 250);
+      return reply({ company: { locations: { nodes, pageInfo: { hasNextPage: start + 250 < locs.length, endCursor: `c${start + 250}` } } } });
+    }
+    if (query.includes("companyContact(id")) {
+      const start = variables.after ? 250 : 0;
+      const nodes = locs.slice(start, start + 250).map((l) => ({ companyLocation: { id: l.id } }));
+      return reply({ companyContact: { roleAssignments: { nodes, pageInfo: { hasNextPage: start + 250 < locs.length, endCursor: `r${start + 250}` } } } });
+    }
+    if (query.includes("metafieldsSet")) return reply({ metafieldsSet: { userErrors: [] } });
+    throw new Error(`unexpected: ${query.slice(0, 60)}`);
+  }) as unknown as typeof fetch;
+  const admin = new ShopifyAdmin({ shop: "t.myshopify.com", clientId: "a", clientSecret: "b", fetch: fn });
+  const plan = {
+    code: "BIG", name: "Big Co", contact: { email: "a@b.co", firstName: "A", lastName: "B" },
+    sites: locs.map((l) => ({ externalId: l.externalId, name: l.name, address: { address1: "1 St", city: "Sydney", zoneCode: "NSW", zip: "2000", countryCode: "AU" } })),
+    skippedSites: [], unleashedPaymentTerm: "30 days", netDays: 30, notes: [],
+  };
+  const r = await applyCompany({ admin, dryRun: false, templates, companyMap: {} }, plan);
+  assert.equal(r.status, "unchanged", r.notes.join());
+  assert.equal(r.sitesExisting, 300);
+  assert.equal(r.sitesCreated, 0);
+  assert.ok(!calls.some((q) => q.includes("companyLocationCreate") || q.includes("companyContactAssignRoles")));
+});

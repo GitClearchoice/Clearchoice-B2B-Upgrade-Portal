@@ -25,11 +25,12 @@ export interface CompanyPlan {
   notes: string[];
 }
 
-/** "30 Days" → 30. Anything we can't read uses the default (and says so). */
+/** "30 Days" → 30; "Same Day" / "Prepaid" → 0 (due on receipt). Anything else uses the default (and says so). */
 export function parseNetDays(term: string | null | undefined, fallback: number): { days: number; note?: string } {
   const t = (term ?? "").trim();
   const m = /(\d+)\s*days?/i.exec(t);
   if (m) return { days: Number(m[1]) };
+  if (/same\s*day|prepaid|cod|cash/i.test(t)) return { days: 0, note: `Unleashed payment term "${t}" set to due on receipt` };
   return { days: fallback, note: t ? `Unleashed payment term "${t}" mapped to Net ${fallback}` : `no payment term in Unleashed; using Net ${fallback}` };
 }
 
@@ -125,15 +126,17 @@ interface ExistingCompany {
 const COMPANY_FIELDS = `
   id externalId
   mainContact { id }
-  locations(first: 250) { nodes { id externalId name } }
-  contacts(first: 100) { nodes { id customer { id email } roleAssignments(first: 250) { nodes { companyLocation { id } } } } }
+  locations(first: 250) { nodes { id externalId name } pageInfo { hasNextPage endCursor } }
+  contacts(first: 100) { nodes { id customer { id email } roleAssignments(first: 250) { nodes { companyLocation { id } } pageInfo { hasNextPage endCursor } } } }
   contactRoles(first: 10) { nodes { id name } }
 `;
 
+type PageInfo = { hasNextPage: boolean; endCursor: string | null };
+
 type RawCompany = {
   id: string; externalId: string | null; mainContact: { id: string } | null;
-  locations: { nodes: { id: string; externalId: string | null; name: string }[] };
-  contacts: { nodes: { id: string; customer: { id: string; email: string | null } | null; roleAssignments: { nodes: { companyLocation: { id: string } | null }[] } }[] };
+  locations: { nodes: { id: string; externalId: string | null; name: string }[]; pageInfo?: PageInfo };
+  contacts: { nodes: { id: string; customer: { id: string; email: string | null } | null; roleAssignments: { nodes: { companyLocation: { id: string } | null }[]; pageInfo?: PageInfo } }[] };
   contactRoles: { nodes: { id: string; name: string }[] };
 };
 
@@ -154,21 +157,63 @@ function toExisting(c: RawCompany): ExistingCompany {
 }
 
 export async function findCompany(ctx: ImportContext, code: string): Promise<ExistingCompany | null> {
+  let raw: RawCompany | undefined;
   const known = ctx.companyMap[code];
   if (known) {
     const r = await ctx.admin.graphql<{ company: RawCompany | null }>(`query($id: ID!) { company(id: $id) { ${COMPANY_FIELDS} } }`, { id: known });
-    if (r.company) return toExisting(r.company);
+    if (r.company) raw = r.company;
   }
-  const q = `external_id:"${code.replace(/(["\\])/g, "\\$1")}"`;
-  const r = await ctx.admin.graphql<{ companies: { nodes: RawCompany[] } }>(
-    `query($q: String!) { companies(first: 10, query: $q) { nodes { ${COMPANY_FIELDS} } } }`,
-    { q },
-  );
-  const hit = r.companies.nodes.find((c) => c.externalId === code);
-  return hit ? toExisting(hit) : null;
+  if (!raw) {
+    const q = `external_id:"${code.replace(/(["\\])/g, "\\$1")}"`;
+    const r = await ctx.admin.graphql<{ companies: { nodes: RawCompany[] } }>(
+      `query($q: String!) { companies(first: 10, query: $q) { nodes { ${COMPANY_FIELDS} } } }`,
+      { q },
+    );
+    raw = r.companies.nodes.find((c) => c.externalId === code);
+  }
+  if (!raw) return null;
+  const company = toExisting(raw);
+  // Some customers have hundreds of sites: fetch the rest so re-runs don't try to recreate them.
+  if (raw.locations.pageInfo?.hasNextPage) company.locations = await allLocations(ctx, company.id);
+  for (const [i, c] of raw.contacts.nodes.entries()) {
+    if (c.roleAssignments.pageInfo?.hasNextPage) company.contacts[i].locationIdsWithRole = await allRoleLocationIds(ctx, c.id);
+  }
+  return company;
+}
+
+async function allLocations(ctx: ImportContext, companyId: string) {
+  const out: { id: string; externalId: string | null; name: string }[] = [];
+  let after: string | null = null;
+  for (;;) {
+    const r: { company: { locations: { nodes: typeof out; pageInfo: PageInfo } } } = await ctx.admin.graphql(
+      `query($id: ID!, $after: String) { company(id: $id) { locations(first: 250, after: $after) { nodes { id externalId name } pageInfo { hasNextPage endCursor } } } }`,
+      { id: companyId, after },
+    );
+    out.push(...r.company.locations.nodes);
+    if (!r.company.locations.pageInfo.hasNextPage) return out;
+    after = r.company.locations.pageInfo.endCursor;
+  }
+}
+
+async function allRoleLocationIds(ctx: ImportContext, contactId: string): Promise<string[]> {
+  const out: string[] = [];
+  let after: string | null = null;
+  for (;;) {
+    const r: { companyContact: { roleAssignments: { nodes: { companyLocation: { id: string } | null }[]; pageInfo: PageInfo } } } = await ctx.admin.graphql(
+      `query($id: ID!, $after: String) { companyContact(id: $id) { roleAssignments(first: 250, after: $after) { nodes { companyLocation { id } } pageInfo { hasNextPage endCursor } } } }`,
+      { id: contactId, after },
+    );
+    out.push(...r.companyContact.roleAssignments.nodes.map((n) => n.companyLocation?.id).filter((x): x is string => !!x));
+    if (!r.companyContact.roleAssignments.pageInfo.hasNextPage) return out;
+    after = r.companyContact.roleAssignments.pageInfo.endCursor;
+  }
 }
 
 export function pickTemplate(templates: PaymentTermsTemplate[], days: number): { template?: PaymentTermsTemplate; note?: string } {
+  if (days === 0) {
+    const receipt = templates.find((t) => /receipt/i.test(t.paymentTermsType));
+    return receipt ? { template: receipt } : { note: "Shopify has no 'due on receipt' terms; none set" };
+  }
   const net = templates.filter((t) => /net/i.test(t.paymentTermsType) && t.dueInDays != null);
   const exact = net.find((t) => t.dueInDays === days);
   if (exact) return { template: exact };
