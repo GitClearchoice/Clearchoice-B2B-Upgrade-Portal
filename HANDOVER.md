@@ -29,8 +29,7 @@ Upload this file to the new Claude project, then start a chat with:
    - the Unleashed sandbox API ID and key go in `.env` only (Unleashed keys can't be regenerated; never paste the live key into a chat).
 
 ## Open questions
-- Unleashed sales order on create: status **Placed** or **Parked**? Which **warehouse** and **tax code** (e.g. G.S.T.) to use?
-- Trade buyers won't see portal orders in their Shopify account's order list (drafts aren't shown there); the portal's order history page covers this. OK?
+- GST-free products: if any products are GST-free (Unleashed "Taxable Sales" off), confirm how their lines should be coded on sales orders (phase 3 test).
 - Quantity Prices: supported; confirm against 1-CT-0014 in the sandbox.
 - Email service: Postmark or Resend (sender service@clearchoiceproducts.com).
 
@@ -79,13 +78,15 @@ Pricing order, mirroring Unleashed:
    1. Work out prices on the server.
    2. `draftOrderCreate` (company/location, variantId + priceOverride ex GST, PO number, net terms, tag `trade-order`). **Never completed**: it stays a draft as the Shopify-side record.
    3. Budget check: the site's month-to-date spend (Sydney calendar month) + this order's goods ex GST, compared with that month's budget.
+      - Buyers see portal orders on the portal's order history page, not in their Shopify account's order list (drafts don't show there). Agreed 26 Nov.
       - **Within budget:** send the order to Unleashed (below), tag the draft `sent-to-unleashed`, store the Unleashed order number on the draft and in the app DB, email the buyer a confirmation.
       - **Over budget:** tag the draft `awaiting-approval`, lock prices, email the head-office admin. Approve → send to Unleashed. Reject → tag `rejected`, notify the buyer.
    4. **Send to Unleashed** (`POST /SalesOrders/{guid}`):
       - `Customer.CustomerCode` = company `externalId`; `CustomerRef` = PO number.
       - `DeliveryName` = company location name; delivery street/suburb/city/region/postcode/country = the location's shipping address.
       - Lines: `Product.ProductCode` = SKU, `OrderQuantity`, `UnitPrice` ex GST, `LineTotal`, `LineTax` (10% GST on taxable products).
-      - `SubTotal` / `TaxTotal` / `Total` (sum of lines; Total = SubTotal + TaxTotal), `Tax`/`TaxRate`, `ExchangeRate` = 1, `OrderStatus` (see open questions).
+      - `SubTotal` / `TaxTotal` / `Total` (sum of lines; Total = SubTotal + TaxTotal), `Tax`/`TaxRate`, `ExchangeRate` = 1.
+      - `OrderStatus` = **Parked**; `Warehouse` = **Clearchoice Warehouse**; tax code **G.S.T.** at rate **0.1** (decided 26 Nov). Tax code kept in a setting and checked against Unleashed's tax list on first use.
       - `Comments`: Shopify draft name, buyer name and email.
       - The app generates the order's Guid and saves it **before** posting, so a retry can never create a duplicate.
       - If Unleashed rejects or is down: the draft is tagged `unleashed-failed`, the order is retried automatically, and Clearchoice staff are emailed. The buyer still sees "order received".
