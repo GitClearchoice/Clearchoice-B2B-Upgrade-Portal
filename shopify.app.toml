@@ -1,0 +1,35 @@
+# Shopify app config (managed by Shopify CLI). Same Dev Dashboard app the phase 2 import scripts use,
+# so the scopes below must keep the import scopes (write_companies, write_customers, read_payment_terms).
+client_id = "4b83184465ec6a5c1d5cb845bd3a8fcc"
+name = "Clearchoice B2B Portal"
+# Replace with the Render URL once the web service exists (e.g. https://clearchoice-b2b.onrender.com).
+# `shopify app dev` swaps in a tunnel URL automatically while developing.
+application_url = "https://example.com"
+embedded = true
+
+[build]
+automatically_update_urls_on_dev = true
+include_config_on_deploy = true
+
+[access_scopes]
+scopes = "read_products,write_draft_orders,write_companies,write_customers,read_payment_terms"
+
+[auth]
+redirect_urls = ["https://example.com/auth/callback"]
+
+# Storefront calls go to https://<shop>/apps/b2b/... and Shopify forwards them, signed, to /proxy/...
+[app_proxy]
+url = "https://example.com/proxy"
+prefix = "apps"
+subpath = "b2b"
+
+[webhooks]
+api_version = "2026-10"
+
+  [[webhooks.subscriptions]]
+  uri = "/webhooks/app/uninstalled"
+  topics = ["app/uninstalled"]
+
+  [[webhooks.subscriptions]]
+  topics = [ "app/scopes_update" ]
+  uri = "/webhooks/app/scopes_update"

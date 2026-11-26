@@ -1,4 +1,4 @@
-# Clearchoice B2B Portal — Handover (updated 25 Nov 2026, phase 1 code written)
+# Clearchoice B2B Portal — Handover (updated 27 Nov 2026, phase 3 app scaffolded)
 
 Upload this file to the new Claude project, then start a chat with:
 "Read clearchoice-b2b-handover.md and continue from 'Next steps'."
@@ -47,7 +47,14 @@ Upload this file to the new Claude project, then start a chat with:
 
 **Phase 3, step 1 — done (26 Nov).** `npm run order:test` sent a Parked test order for Assetlink (Westpoint Blacktown) straight to the Unleashed sandbox: it landed under the right customer. Corrections: tax code OUTPUT ("GST on Income (10%)"), City left blank. Re-tested 26 Nov: customer, delivery name and address, Customer Reference (PO), prices, GST and warehouse all confirmed correct in Unleashed.
 
-**Phase 3 next:** scaffold the Shopify app (Shopify CLI, React Router) on Render with Postgres (prisma/schema.prisma), price display + "Place order". Before then, copy the live theme and a few hundred products (SKUs = Unleashed codes) into the dev store.
+**Phase 3, step 2 — app scaffolded (27 Nov), not yet run against Shopify/Render.** The repo root is now the Shopify app (React Router template) as well as the engine (`src/`). Added: Postgres schema + first migration (sessions + pricing), `PrismaStore` (sync writes to Postgres when `DATABASE_URL` is set), buyer → site → Unleashed code resolution (`src/b2b/buyer.ts`), storefront price endpoint `GET /apps/b2b/prices` (app proxy), staff home page (sync status + price check), `render.yaml` (web + Postgres + nightly cron, Singapore). `shopify.app.toml` uses the existing Dev Dashboard app (client ID 4b83…) and keeps the import scopes.
+
+**Phase 3 next:**
+1. You: copy the live theme (Online Store → Themes → … → Download theme file, upload to the dev store) and export a few hundred products from the live admin as CSV and import them into the dev store (SKUs = Unleashed codes).
+2. You: on Render, New → Blueprint → this repo. Enter the Unleashed sandbox ID/key and the Shopify Client ID/Secret (`SHOPIFY_API_KEY` / `SHOPIFY_API_SECRET`); set `SHOPIFY_APP_URL` to the web service URL, and put that URL in `shopify.app.toml` (`application_url`, redirect URL, app proxy URL).
+3. Run `npm run shopify app deploy` (or `npm run dev` for a tunnel) so Shopify picks up the new scopes and app proxy; approve the scope update on the dev store.
+4. Trigger the sync cron once on Render, check the app's home page shows ~9,000 products, and price-check a few known cases.
+5. Next code: theme app extension (prices on product/collection/cart pages via `/apps/b2b/prices`, site picker), then "Place order" (draft order + send to Unleashed, using `src/unleashed/salesOrder.ts`) with a TradeOrder table for the Guid/idempotency.
 
 ---
 

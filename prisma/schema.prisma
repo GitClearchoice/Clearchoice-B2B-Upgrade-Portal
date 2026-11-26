@@ -1,5 +1,5 @@
-// Postgres tables for synced Unleashed pricing data. The Shopify app (phase 2+) implements
-// PriceStore (src/sync/store.ts) on these. Not used by the phase 1 scripts, which use FileStore.
+// Postgres (Render). Shopify sessions + synced Unleashed pricing data.
+// The app and the sync cron read/write pricing through PrismaStore (src/sync/prismaStore.ts).
 
 datasource db {
   provider = "postgresql"
@@ -10,22 +10,44 @@ generator client {
   provider = "prisma-client-js"
 }
 
+// Shopify app sessions (@shopify/shopify-app-session-storage-prisma)
+model Session {
+  id                  String    @id
+  shop                String
+  state               String
+  isOnline            Boolean   @default(false)
+  scope               String?
+  expires             DateTime?
+  accessToken         String
+  userId              BigInt?
+  firstName           String?
+  lastName            String?
+  email               String?
+  accountOwner        Boolean   @default(false)
+  locale              String?
+  collaborator        Boolean?  @default(false)
+  emailVerified       Boolean?  @default(false)
+  refreshToken        String?
+  refreshTokenExpires DateTime?
+}
+
 model UnleashedProduct {
-  code             String   @id // Unleashed ProductCode = Shopify variant SKU
+  code             String    @id // Unleashed ProductCode = Shopify variant SKU
   description      String?
   groupName        String?
-  defaultSellPrice Decimal? @db.Decimal(14, 4)
-  tierPrices       Decimal[] @db.Decimal(14, 4) // index 0 = Tier 1; 0 stored as null in app code
-  taxable          Boolean  @default(true)
-  obsolete         Boolean  @default(false)
-  sellable         Boolean  @default(true)
-  syncedAt         DateTime @updatedAt
+  defaultSellPrice Decimal?  @db.Decimal(14, 4)
+  /// Index 0 = Tier 1. Postgres arrays can't hold nulls through Prisma, so 0 = blank in Unleashed.
+  tierPrices       Decimal[] @db.Decimal(14, 4)
+  taxable          Boolean   @default(true)
+  obsolete         Boolean   @default(false)
+  sellable         Boolean   @default(true)
+  syncedAt         DateTime  @updatedAt
 
   @@index([groupName])
 }
 
 model UnleashedCustomer {
-  code     String   @id // Unleashed CustomerCode = Shopify company.externalId
+  code     String   @id // Unleashed CustomerCode (exact, spaces kept)
   name     String?
   tier     Int?
   discount Decimal  @default(0) @db.Decimal(7, 6) // fraction, 0.05 = 5%
@@ -50,15 +72,15 @@ model CustomerPriceRule {
 }
 
 model ProductQuantityPrice {
-  id            String   @id // Unleashed ProductPrice Guid
-  productCode   String
-  type          String // "fixed" | "discount"
-  value         Decimal  @db.Decimal(14, 4)
+  id             String   @id // Unleashed ProductPrice Guid
+  productCode    String
+  type           String // "fixed" | "discount"
+  value          Decimal  @db.Decimal(14, 4)
   unleashedPrice Decimal? @db.Decimal(14, 4)
-  minQty        Decimal  @default(0) @db.Decimal(14, 4)
-  validFrom     String?
-  validTo       String?
-  syncedAt      DateTime @updatedAt
+  minQty         Decimal  @default(0) @db.Decimal(14, 4)
+  validFrom      String?
+  validTo        String?
+  syncedAt       DateTime @updatedAt
 
   @@index([productCode])
 }

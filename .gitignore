@@ -1,4 +1,14 @@
 node_modules/
 .env
+.env.*
+!.env.example
 data/
 *.log
+
+/.cache
+/build
+/public/build/
+/extensions/*/dist
+.shopify/*
+.shopify.lock
+.react-router/

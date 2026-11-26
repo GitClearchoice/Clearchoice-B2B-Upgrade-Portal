@@ -60,13 +60,34 @@ npm run order:test -- --send  # sends ONE test order to the Unleashed sandbox
 
 Checks the warehouse and tax code exist first, prices from the last sync, and saves the order's Guid to `data/test-orders.json` before sending (so a retry can't duplicate it). Settings: `UNLEASHED_ORDER_STATUS`, `UNLEASHED_WAREHOUSE`, `UNLEASHED_TAX_CODE`, `UNLEASHED_TAX_RATE`.
 
+## Phase 3, step 2: the Shopify app (scaffold)
+
+The repo root is now also the Shopify app (Shopify's React Router template). `src/` stays the shared engine; the app imports it.
+
+| Part | File | What it does |
+|---|---|---|
+| App config | `shopify.app.toml` | Same Dev Dashboard app as the import scripts (keeps their scopes) + `write_draft_orders`, `read_products`; app proxy `/apps/b2b` → `/proxy` |
+| Postgres | `prisma/schema.prisma`, `prisma/migrations/` | Shopify sessions + synced Unleashed pricing |
+| Postgres store | `src/sync/prismaStore.ts` | `PriceStore` on Postgres. `npm run sync` uses it when `DATABASE_URL` is set (add `--file` to force the JSON snapshot) |
+| Buyer → site → Unleashed code | `src/b2b/buyer.ts` | Logged-in customer → company → their sites; site metafield `unleashed.customer_code` else the company's |
+| Storefront prices | `app/routes/proxy.prices.tsx` | `GET /apps/b2b/prices?lines=SKU:QTY,…&location=<site id>` (signed app proxy) → the buyer's ex/inc GST prices |
+| Staff home | `app/routes/app._index.tsx` | Sync status (last run, counts, last error) and a price check |
+| Hosting | `render.yaml` | Render Blueprint: web service, Postgres, nightly sync cron (Singapore region) |
+
+```bash
+npm install
+npx prisma migrate deploy     # needs DATABASE_URL (e.g. the Render Postgres external URL)
+npm run sync                  # fills Postgres from the Unleashed sandbox
+npm run dev                   # shopify app dev: tunnel + installs on the dev store
+```
+
 ## Running it
 
 Needs Node 22.18 or later. No runtime dependencies.
 
 ```bash
 cp .env.example .env          # add the NEW sandbox API ID and key
-npm test                      # 35 tests, no network needed
+npm test                      # 80 tests, no network needed
 npm run sandbox:check         # checks auth, shows field formats, does a full sync
 npm run sandbox:check -- CUSTCODE SKU 5   # prices one line; compare with an Unleashed sales order
 npm run price -- CUSTCODE SKU 1 48 50   # quick: prices from the last sync, no Unleashed calls
