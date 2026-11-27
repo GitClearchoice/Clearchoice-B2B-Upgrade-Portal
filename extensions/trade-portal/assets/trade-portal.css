@@ -28,3 +28,8 @@ a.cc-site-picker__item:hover, a.cc-site-picker__item:focus { background: rgba(0,
 .cc-site-picker__item.is-current { font-weight: 600; }
 .cc-site-picker__item em { font-weight: 400; font-style: normal; opacity: .65; }
 .cc-site-picker__empty { margin: .5rem; opacity: .7; }
+/* Place order: Pantone 192 C red (#E40046), larger bold text, boxed. Own class, not the theme's .button. */
+.cc-trade-order .cc-trade-order__submit { display: inline-block; justify-self: start; padding: .85rem 2rem; font: inherit; font-size: 1.25em; font-weight: 700; line-height: 1.2; color: #fff; background: #e40046; border: 2px solid #b80038; border-radius: 6px; cursor: pointer; }
+.cc-trade-order .cc-trade-order__submit:hover:not(:disabled), .cc-trade-order .cc-trade-order__submit:focus-visible { background: #c8003d; }
+.cc-trade-order .cc-trade-order__submit:focus-visible { outline: 3px solid rgba(228,0,70,.35); outline-offset: 2px; }
+.cc-trade-order .cc-trade-order__submit:disabled { opacity: .5; cursor: not-allowed; }
