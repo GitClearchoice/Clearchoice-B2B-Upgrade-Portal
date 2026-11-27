@@ -1,7 +1,7 @@
 {%- comment -%}
   App embed: for trade buyers, hides the theme's own checkout and express-checkout buttons
-  (trade orders go through "Place order") and, optionally, the theme's retail prices so only
-  the trade price (Trade price / Trade order blocks) shows. Locations are also set to submit orders as drafts,
+  (trade orders go through "Place order") and, optionally, the theme's retail prices and cart
+  prices/totals, so only the trade prices (Trade price / Trade order blocks, product cards) show. Locations are also set to submit orders as drafts,
   as a safety net if a buyer reaches checkout anyway.
 {%- endcomment -%}
 {%- if customer and customer.b2b? -%}
@@ -17,6 +17,13 @@
     {%- endif -%}
     {%- if block.settings.hide_theme_prices and block.settings.price_selector != blank -%}
     {{ block.settings.price_selector }} { display: none !important; }
+    {%- endif -%}
+    {%- comment -%}
+      The theme's cart shows Shopify's own product prices, which differ from the trade prices.
+      The Trade order block on the cart page shows the trade prices and totals instead.
+    {%- endcomment -%}
+    {%- if block.settings.hide_cart_prices and block.settings.cart_price_selector != blank -%}
+    {{ block.settings.cart_price_selector }} { display: none !important; }
     {%- endif -%}
   </style>
   <script>document.documentElement.classList.add("cc-trade-buyer");</script>
@@ -47,6 +54,14 @@
       "label": "Theme price elements to hide (CSS selector)",
       "info": "Change this if your theme still shows retail prices to trade buyers.",
       "default": ".price, product-price, .product__price, .product-price, [data-product-price]"
+    },
+    { "type": "checkbox", "id": "hide_cart_prices", "label": "Hide the theme's cart prices and totals for trade buyers", "default": true },
+    {
+      "type": "text",
+      "id": "cart_price_selector",
+      "label": "Theme cart price elements to hide (CSS selector)",
+      "info": "The Trade order block shows the trade prices and totals. Change this if the theme's cart still shows prices.",
+      "default": ".cart-item__price-wrapper, .cart-item__totals, .cart-item__price, .cart-items__price, .totals, .cart__subtotal, .cart-subtotal, .cart__total, cart-totals, .line-item__price, [data-cart-subtotal], [data-cart-item-price]"
     }
   ]
 }
