@@ -81,12 +81,16 @@ export function addMonths(month: string, n: number): string {
 }
 
 /** Short label for table headings: "Dec 2026". */
+const MONTHS = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
 export function shortMonthLabel(month: string): string {
   const [y, m] = month.split("-").map(Number) as [number, number];
-  return new Date(Date.UTC(y, m - 1, 15)).toLocaleDateString("en-AU", { month: "short", year: "numeric", timeZone: "UTC" });
+  return `${MONTHS[m - 1]} ${y}`; // fixed names: en-AU gives "June"/"Sept"
 }
 
-/** Calendar quarter ("2026-Q4" = Oct–Dec 2026; Australian FY quarters use the same months). */
+/**
+ * Australian financial-year quarter (FY runs 1 July – 30 June and is named by the year it ends):
+ * Q1 Jul–Sep, Q2 Oct–Dec, Q3 Jan–Mar, Q4 Apr–Jun. "FY2027-Q2" = Oct–Dec 2026.
+ */
 export interface Quarter {
   key: string;
   label: string;
@@ -95,15 +99,17 @@ export interface Quarter {
 
 export function quarterOf(month: string): Quarter {
   const [y, m] = month.split("-").map(Number) as [number, number];
-  const q = Math.floor((m - 1) / 3) + 1;
-  const first = `${y}-${String((q - 1) * 3 + 1).padStart(2, "0")}`;
+  const fy = m >= 7 ? y + 1 : y;
+  const q = Math.floor(((m + 5) % 12) / 3) + 1; // Jul→1 … Jun→4
+  const first = addMonths(`${fy - 1}-07`, (q - 1) * 3);
   const months: [string, string, string] = [first, addMonths(first, 1), addMonths(first, 2)];
   const short = (mm: string) => shortMonthLabel(mm).split(" ")[0];
-  return { key: `${y}-Q${q}`, label: `Q${q}: ${short(months[0])}–${short(months[2])} ${y}`, months };
+  const lastYear = months[2].slice(0, 4);
+  return { key: `FY${fy}-Q${q}`, label: `Q${q} FY${fy} (${short(months[0])}–${short(months[2])} ${lastYear})`, months };
 }
 
-/** Parses "2026-Q4"; null if it isn't one. */
+/** Parses "FY2027-Q2"; null if it isn't one. */
 export function parseQuarter(key: string | null | undefined): Quarter | null {
-  const m = /^(\d{4})-Q([1-4])$/.exec(key ?? "");
-  return m ? quarterOf(`${m[1]}-${String((Number(m[2]) - 1) * 3 + 1).padStart(2, "0")}`) : null;
+  const m = /^FY(\d{4})-Q([1-4])$/.exec(key ?? "");
+  return m ? quarterOf(addMonths(`${Number(m[1]) - 1}-07`, (Number(m[2]) - 1) * 3)) : null;
 }

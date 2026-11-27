@@ -291,7 +291,13 @@ test("months and quarters", async () => {
   assert.equal(addMonths("2026-11", 3), "2027-02");
   assert.equal(addMonths("2026-01", -1), "2025-12");
   assert.equal(shortMonthLabel("2026-12"), "Dec 2026");
-  assert.deepEqual(quarterOf("2026-11"), { key: "2026-Q4", label: "Q4: Oct–Dec 2026", months: ["2026-10", "2026-11", "2026-12"] });
-  assert.equal(parseQuarter("2027-Q1")!.months[0], "2027-01");
-  assert.equal(parseQuarter("2027-Q5"), null);
+  // Australian financial year: Q1 Jul–Sep … Q4 Apr–Jun, named by the year it ends.
+  assert.deepEqual(quarterOf("2026-11"), { key: "FY2027-Q2", label: "Q2 FY2027 (Oct–Dec 2026)", months: ["2026-10", "2026-11", "2026-12"] });
+  assert.deepEqual(quarterOf("2026-07").months, ["2026-07", "2026-08", "2026-09"]);
+  assert.equal(quarterOf("2026-07").key, "FY2027-Q1");
+  assert.equal(quarterOf("2027-02").key, "FY2027-Q3");
+  assert.equal(quarterOf("2027-06").key, "FY2027-Q4");
+  assert.deepEqual(parseQuarter("FY2027-Q3")!.months, ["2027-01", "2027-02", "2027-03"]);
+  assert.equal(parseQuarter("FY2027-Q4")!.label, "Q4 FY2027 (Apr–Jun 2027)");
+  assert.equal(parseQuarter("2027-Q1"), null);
 });

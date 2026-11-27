@@ -10,7 +10,8 @@ import { setSiteClosed, syncSites } from "../sites.server";
 import { isDormant } from "../../src/b2b/siteStatus.ts";
 
 // Staff page: monthly site budgets per company (goods ex GST, Sydney calendar month).
-// "Every month" is the default; a month's own amount (this month + next 3) overrides it.
+// "Every month" is the default; a month's own amount overrides it. Shown one Australian financial-year
+// quarter at a time (Q1 Jul–Sep … Q4 Apr–Jun), with previous/next quarter.
 // Blank = no budget (no limit). Below: a quarterly summary (budget vs ordered per site).
 // Head-office admins get their own page in phase 5.
 
@@ -65,11 +66,6 @@ async function gql<T>(admin: Gql, q: string, variables: Record<string, unknown>)
   return body.data;
 }
 
-const MONTHS_SHOWN = 4;
-function months(now = new Date()): string[] {
-  const first = sydneyMonth(now);
-  return Array.from({ length: MONTHS_SHOWN }, (_, i) => addMonths(first, i));
-}
 
 async function companySites(admin: Gql, companyId: string) {
   const sites: { id: string; name: string }[] = [];
@@ -92,9 +88,10 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
   const url = new URL(request.url);
   const q = url.searchParams.get("q")?.trim() ?? "";
   const companyId = url.searchParams.get("company");
-  const ms = months();
+  // Budgets are shown a financial-year quarter at a time (default: the current one).
+  const quarter = parseQuarter(url.searchParams.get("quarter")) ?? quarterOf(sydneyMonth(new Date()));
+  const ms = [...quarter.months];
   const labels = ms.map(shortMonthLabel);
-  const quarter = parseQuarter(url.searchParams.get("quarter")) ?? quarterOf(ms[0]!);
 
   const companies = q ? await searchCompanies(admin, q) : [];
 
@@ -118,7 +115,7 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
     return { lastOrderAt: x?.lastOrderAt?.toISOString() ?? null, dormant: checked && isDormant(x?.lastOrderAt ?? null, now) };
   };
   const rows = await prisma.siteBudget.findMany({
-    where: { shop: session.shop, companyId, month: { in: ["default", ...new Set([...ms, ...quarter.months])] } },
+    where: { shop: session.shop, companyId, month: { in: ["default", ...ms] } },
   });
   const val = (loc: string, month: string) => {
     const r = rows.find((x) => x.locationId === loc && x.month === month);
@@ -207,7 +204,9 @@ export const action = async ({ request }: ActionFunctionArgs) => {
     });
     return { synced: `${siteName} reopened.` };
   }
-  const ms = months();
+  // The months on the form: the quarter being edited.
+  const quarter = parseQuarter(String(form.get("quarter") ?? "")) ?? quarterOf(sydneyMonth(new Date()));
+  const ms = [...quarter.months];
   const { sites } = await companySites(admin, companyId);
   const allDefault = String(form.get("allDefault") ?? "").trim();
 
@@ -331,8 +330,16 @@ export default function Budgets() {
               <s-button type="submit" variant="tertiary" {...(busy ? { loading: true } : {})}>Update sites from Unleashed now</s-button>
             </Form>
           </s-stack>
+          {data.quarter && data.summary && (
+            <s-stack direction="inline" gap="base">
+              <s-text type="strong">{data.quarter.label}</s-text>
+              <s-link href={`/app/budgets?q=${encodeURIComponent(data.q)}&company=${encodeURIComponent(data.company.id)}&quarter=${data.summary.prev}`}>‹ Previous quarter</s-link>
+              <s-link href={`/app/budgets?q=${encodeURIComponent(data.q)}&company=${encodeURIComponent(data.company.id)}&quarter=${data.summary.next}`}>Next quarter ›</s-link>
+            </s-stack>
+          )}
           <Form method="post" key={params.toString() + (result && "saved" in result ? Date.now() : "")}>
             <input type="hidden" name="company" value={data.company.id} />
+            <input type="hidden" name="quarter" value={data.quarter?.key ?? ""} />
             <s-stack direction="block" gap="base">
               <s-text-field label="Set 'every month' for all sites (optional)" name="allDefault" placeholder="e.g. 2000" />
               <div style={scrollBox}>
@@ -406,10 +413,6 @@ export default function Budgets() {
 
       {data.company && data.summary && data.quarter && (
         <s-section heading={`Quarterly summary: ${data.quarter.label}`}>
-          <s-stack direction="inline" gap="base">
-            <s-link href={`/app/budgets?q=${encodeURIComponent(data.q)}&company=${encodeURIComponent(data.company.id)}&quarter=${data.summary.prev}`}>‹ Previous quarter</s-link>
-            <s-link href={`/app/budgets?q=${encodeURIComponent(data.q)}&company=${encodeURIComponent(data.company.id)}&quarter=${data.summary.next}`}>Next quarter ›</s-link>
-          </s-stack>
           <s-paragraph>
             Goods ex GST. Budget = the three months added up ("No budget" if any month has none). Ordered = sent to
             Clearchoice (incl. approved orders); declined orders don't count.
