@@ -9,10 +9,33 @@ import { monthLabel, sydneyMonth } from "../../src/orders/budget.ts";
 // "Every month" is the default; a month's own amount overrides it. Blank = no budget (no limit).
 // Head-office admins get their own page in phase 5.
 
+// All companies (a few hundred at most), filtered here: Shopify's search on names is case-sensitive
+// with wildcards and only matches whole words without them.
 const COMPANIES = `#graphql
-  query BudgetCompanies($q: String) {
-    companies(first: 25, query: $q, sortKey: NAME) { nodes { id name locationsCount { count } } }
+  query BudgetCompanies($after: String) {
+    companies(first: 250, after: $after, sortKey: NAME) {
+      nodes { id name externalId locationsCount { count } }
+      pageInfo { hasNextPage endCursor }
+    }
   }`;
+
+type CompanyRow = { id: string; name: string; externalId: string | null; locationsCount: { count: number } };
+
+async function searchCompanies(admin: Gql, q: string): Promise<CompanyRow[]> {
+  const words = q.toLowerCase().split(/\s+/).filter(Boolean);
+  const out: CompanyRow[] = [];
+  let after: string | null = null;
+  for (let page = 0; page < 20; page++) {
+    const d: { companies: { nodes: CompanyRow[]; pageInfo: { hasNextPage: boolean; endCursor: string } } } = await gql(admin, COMPANIES, { after });
+    for (const c of d.companies.nodes) {
+      const text = `${c.name} ${c.externalId ?? ""}`.toLowerCase();
+      if (words.every((w) => text.includes(w))) out.push(c);
+    }
+    if (!d.companies.pageInfo.hasNextPage) break;
+    after = d.companies.pageInfo.endCursor;
+  }
+  return out.slice(0, 50);
+}
 
 const LOCATIONS = `#graphql
   query BudgetLocations($id: ID!, $after: String) {
@@ -64,9 +87,7 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
   const companyId = url.searchParams.get("company");
   const [m1, m2] = months();
 
-  const companies = q
-    ? (await gql<{ companies: { nodes: { id: string; name: string; locationsCount: { count: number } }[] } }>(admin, COMPANIES, { q: `name:*${q.replace(/["\\]/g, "")}*` })).companies.nodes
-    : [];
+  const companies = q ? await searchCompanies(admin, q) : [];
 
   if (!companyId) return { q, companies, company: null, months: [m1, m2], labels: [monthLabel(m1), monthLabel(m2)] };
 
@@ -157,7 +178,7 @@ export default function Budgets() {
       <s-section heading="Find a company">
         <Form method="get">
           <s-stack direction="inline" gap="base">
-            <s-text-field label="Company name" name="q" value={data.q} />
+            <s-text-field label="Company name or Unleashed code (any part, any case)" name="q" value={data.q} />
             <s-button type="submit">Search</s-button>
           </s-stack>
         </Form>
