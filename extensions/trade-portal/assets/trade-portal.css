@@ -2,7 +2,6 @@
 .cc-trade-price__label { font-size: .85em; opacity: .75; }
 .cc-trade-price__value { font-size: 1.4em; font-weight: 600; }
 .cc-trade-price__value small { font-size: .6em; font-weight: 400; opacity: .75; }
-.cc-trade-price__site { font-size: .8em; opacity: .65; margin-top: .25rem; }
 .cc-trade-order { margin: 2rem 0; }
 .cc-trade-order table { width: 100%; border-collapse: collapse; margin: 1rem 0; }
 .cc-trade-order th, .cc-trade-order td { padding: .5rem; border-bottom: 1px solid rgba(0,0,0,.08); text-align: left; }
