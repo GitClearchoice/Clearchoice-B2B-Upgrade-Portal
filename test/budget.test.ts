@@ -285,3 +285,13 @@ test("an email failure never stops the order", async () => {
   const r = await placeTradeOrder(d, { shop: "dev", requestKey: "req-x", buyer, poNumber: "PO-1", lines: [{ variantId: "1", quantity: 1 }] });
   assert.equal(r.status, "sent");
 });
+
+test("months and quarters", async () => {
+  const { addMonths, quarterOf, parseQuarter, shortMonthLabel } = await import("../src/orders/budget.ts");
+  assert.equal(addMonths("2026-11", 3), "2027-02");
+  assert.equal(addMonths("2026-01", -1), "2025-12");
+  assert.equal(shortMonthLabel("2026-12"), "Dec 2026");
+  assert.deepEqual(quarterOf("2026-11"), { key: "2026-Q4", label: "Q4: Oct–Dec 2026", months: ["2026-10", "2026-11", "2026-12"] });
+  assert.equal(parseQuarter("2027-Q1")!.months[0], "2027-01");
+  assert.equal(parseQuarter("2027-Q5"), null);
+});

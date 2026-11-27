@@ -3,10 +3,12 @@ import { Form, useActionData, useLoaderData, useNavigation, useSearchParams } fr
 import { boundary } from "@shopify/shopify-app-react-router/server";
 import { authenticate } from "../shopify.server";
 import prisma from "../db.server";
-import { monthLabel, sydneyMonth } from "../../src/orders/budget.ts";
+import { addMonths, monthLabel, parseQuarter, quarterOf, shortMonthLabel, sydneyMonth, sydneyMonthRange } from "../../src/orders/budget.ts";
+import { COMMITTED } from "../budget.server";
 
 // Staff page: monthly site budgets per company (goods ex GST, Sydney calendar month).
-// "Every month" is the default; a month's own amount overrides it. Blank = no budget (no limit).
+// "Every month" is the default; a month's own amount (this month + next 3) overrides it.
+// Blank = no budget (no limit). Below: a quarterly summary (budget vs ordered per site).
 // Head-office admins get their own page in phase 5.
 
 // All companies (a few hundred at most), filtered here: Shopify's search on names is case-sensitive
@@ -60,11 +62,10 @@ async function gql<T>(admin: Gql, q: string, variables: Record<string, unknown>)
   return body.data;
 }
 
-function months(now = new Date()) {
-  const m1 = sydneyMonth(now);
-  const [y, m] = m1.split("-").map(Number) as [number, number];
-  const m2 = m === 12 ? `${y + 1}-01` : `${y}-${String(m + 1).padStart(2, "0")}`;
-  return [m1, m2] as const;
+const MONTHS_SHOWN = 4;
+function months(now = new Date()): string[] {
+  const first = sydneyMonth(now);
+  return Array.from({ length: MONTHS_SHOWN }, (_, i) => addMonths(first, i));
 }
 
 async function companySites(admin: Gql, companyId: string) {
@@ -88,17 +89,53 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
   const url = new URL(request.url);
   const q = url.searchParams.get("q")?.trim() ?? "";
   const companyId = url.searchParams.get("company");
-  const [m1, m2] = months();
+  const ms = months();
+  const labels = ms.map(shortMonthLabel);
+  const quarter = parseQuarter(url.searchParams.get("quarter")) ?? quarterOf(ms[0]!);
 
   const companies = q ? await searchCompanies(admin, q) : [];
 
-  if (!companyId) return { q, companies, company: null, months: [m1, m2], labels: [monthLabel(m1), monthLabel(m2)] };
+  if (!companyId) return { q, companies, company: null, months: ms, labels, quarter: null, summary: null };
 
   const { name, sites } = await companySites(admin, companyId);
-  const rows = await prisma.siteBudget.findMany({ where: { shop: session.shop, companyId, month: { in: ["default", m1, m2] } } });
+  const rows = await prisma.siteBudget.findMany({
+    where: { shop: session.shop, companyId, month: { in: ["default", ...new Set([...ms, ...quarter.months])] } },
+  });
   const val = (loc: string, month: string) => {
     const r = rows.find((x) => x.locationId === loc && x.month === month);
     return r ? Number(r.amountExGst.toString()) : null;
+  };
+  const effective = (loc: string, month: string) => val(loc, month) ?? val(loc, "default");
+
+  // Quarterly summary: budget (sum of the 3 months; "no limit" if any month has none) vs ordered.
+  const range = { start: sydneyMonthRange(quarter.months[0]).start, end: sydneyMonthRange(quarter.months[2]).end };
+  const spend = await prisma.tradeOrder.groupBy({
+    by: ["locationId", "status"],
+    where: { shop: session.shop, companyId, createdAt: { gte: range.start, lt: range.end }, status: { in: [...COMMITTED, "awaiting-approval"] } },
+    _sum: { goodsExGst: true },
+  });
+  const spentOf = (loc: string, awaiting: boolean) =>
+    spend
+      .filter((g) => g.locationId === loc && (g.status === "awaiting-approval") === awaiting)
+      .reduce((t, g) => t + Number(g._sum.goodsExGst?.toString() ?? 0), 0);
+  const summaryRows = sites.map((s) => {
+    const monthly = quarter.months.map((m) => effective(s.id, m));
+    const budget = monthly.some((v) => v == null) ? null : monthly.reduce<number>((t, v) => t + (v ?? 0), 0);
+    const ordered = Math.round(spentOf(s.id, false) * 100) / 100;
+    const awaiting = Math.round(spentOf(s.id, true) * 100) / 100;
+    return { id: s.id, name: s.name, budget, ordered, awaiting, remaining: budget == null ? null : Math.round((budget - ordered) * 100) / 100 };
+  });
+  const sum = (xs: number[]) => Math.round(xs.reduce((t, v) => t + v, 0) * 100) / 100;
+  const summary = {
+    rows: summaryRows,
+    totals: {
+      budget: sum(summaryRows.filter((r) => r.budget != null).map((r) => r.budget!)),
+      ordered: sum(summaryRows.map((r) => r.ordered)),
+      awaiting: sum(summaryRows.map((r) => r.awaiting)),
+      unbudgeted: summaryRows.filter((r) => r.budget == null).length,
+    },
+    prev: quarterOf(addMonths(quarter.months[0], -3)).key,
+    next: quarterOf(addMonths(quarter.months[0], 3)).key,
   };
   const orders = await prisma.tradeOrder.findMany({
     where: { shop: session.shop, companyId },
@@ -109,12 +146,14 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
   return {
     q,
     companies,
-    months: [m1, m2],
-    labels: [monthLabel(m1), monthLabel(m2)],
+    months: ms,
+    labels,
+    quarter,
+    summary,
     company: {
       id: companyId,
       name,
-      sites: sites.map((s) => ({ ...s, default: val(s.id, "default"), m1: val(s.id, m1), m2: val(s.id, m2) })),
+      sites: sites.map((s) => ({ ...s, default: val(s.id, "default"), months: ms.map((m) => val(s.id, m)) })),
     },
     orders: orders.map((o) => ({ ...o, goodsExGst: Number(o.goodsExGst.toString()), createdAt: o.createdAt.toISOString() })),
   };
@@ -125,7 +164,7 @@ export const action = async ({ request }: ActionFunctionArgs) => {
   const form = await request.formData();
   const companyId = String(form.get("company") ?? "");
   if (!companyId) return { error: "No company selected" };
-  const [m1, m2] = months();
+  const ms = months();
   const { sites } = await companySites(admin, companyId);
   const allDefault = String(form.get("allDefault") ?? "").trim();
 
@@ -138,7 +177,8 @@ export const action = async ({ request }: ActionFunctionArgs) => {
   const bad: string[] = [];
   const ops = [];
   for (const site of sites) {
-    for (const [field, month] of [["default", "default"], ["m1", m1], ["m2", m2]] as const) {
+    const fields: [string, string][] = [["default", "default"], ...ms.map((m, i): [string, string] => [`m${i}`, m])];
+    for (const [field, month] of fields) {
       let raw = form.get(`${field}:${site.id}`);
       if (field === "default" && allDefault) raw = allDefault;
       if (raw === null) continue; // not on the form
@@ -222,16 +262,16 @@ export default function Budgets() {
                 <s-table-header-row>
                   <s-table-header>Site</s-table-header>
                   <s-table-header>Every month</s-table-header>
-                  <s-table-header>{data.labels[0]}</s-table-header>
-                  <s-table-header>{data.labels[1]}</s-table-header>
+                  {data.labels.map((l) => <s-table-header key={l}>{l}</s-table-header>)}
                 </s-table-header-row>
                 <s-table-body>
                   {data.company.sites.map((s) => (
                     <s-table-row key={s.id}>
                       <s-table-cell>{s.name}</s-table-cell>
                       <s-table-cell><s-text-field label="Every month" labelAccessibilityVisibility="exclusive" name={`default:${s.id}`} value={s.default?.toString() ?? ""} /></s-table-cell>
-                      <s-table-cell><s-text-field label={data.labels[0]} labelAccessibilityVisibility="exclusive" name={`m1:${s.id}`} value={s.m1?.toString() ?? ""} /></s-table-cell>
-                      <s-table-cell><s-text-field label={data.labels[1]} labelAccessibilityVisibility="exclusive" name={`m2:${s.id}`} value={s.m2?.toString() ?? ""} /></s-table-cell>
+                      {s.months.map((v, i) => (
+                        <s-table-cell key={i}><s-text-field label={data.labels[i]!} labelAccessibilityVisibility="exclusive" name={`m${i}:${s.id}`} value={v?.toString() ?? ""} /></s-table-cell>
+                      ))}
                     </s-table-row>
                   ))}
                 </s-table-body>
@@ -239,6 +279,48 @@ export default function Budgets() {
               <s-button type="submit" variant="primary" {...(busy ? { loading: true } : {})}>Save budgets</s-button>
             </s-stack>
           </Form>
+        </s-section>
+      )}
+
+      {data.company && data.summary && data.quarter && (
+        <s-section heading={`Quarterly summary: ${data.quarter.label}`}>
+          <s-stack direction="inline" gap="base">
+            <s-link href={`/app/budgets?q=${encodeURIComponent(data.q)}&company=${encodeURIComponent(data.company.id)}&quarter=${data.summary.prev}`}>‹ Previous quarter</s-link>
+            <s-link href={`/app/budgets?q=${encodeURIComponent(data.q)}&company=${encodeURIComponent(data.company.id)}&quarter=${data.summary.next}`}>Next quarter ›</s-link>
+          </s-stack>
+          <s-paragraph>
+            Goods ex GST. Budget = the three months added up ("No budget" if any month has none). Ordered = sent to
+            Clearchoice (incl. approved orders); declined orders don't count.
+          </s-paragraph>
+          <s-table>
+            <s-table-header-row>
+              <s-table-header>Site</s-table-header>
+              <s-table-header>Quarter budget</s-table-header>
+              <s-table-header>Ordered</s-table-header>
+              <s-table-header>Waiting for approval</s-table-header>
+              <s-table-header>Remaining</s-table-header>
+            </s-table-header-row>
+            <s-table-body>
+              {data.summary.rows.map((r) => (
+                <s-table-row key={r.id}>
+                  <s-table-cell>{r.name}</s-table-cell>
+                  <s-table-cell>{r.budget == null ? "No budget" : money(r.budget)}</s-table-cell>
+                  <s-table-cell>{money(r.ordered)}</s-table-cell>
+                  <s-table-cell>{r.awaiting ? money(r.awaiting) : "–"}</s-table-cell>
+                  <s-table-cell>
+                    {r.remaining == null ? "–" : r.remaining < 0 ? <s-text tone="critical">Over by {money(-r.remaining)}</s-text> : money(r.remaining)}
+                  </s-table-cell>
+                </s-table-row>
+              ))}
+              <s-table-row>
+                <s-table-cell><s-text type="strong">All sites</s-text></s-table-cell>
+                <s-table-cell><s-text type="strong">{money(data.summary.totals.budget)}{data.summary.totals.unbudgeted ? ` (+${data.summary.totals.unbudgeted} without budget)` : ""}</s-text></s-table-cell>
+                <s-table-cell><s-text type="strong">{money(data.summary.totals.ordered)}</s-text></s-table-cell>
+                <s-table-cell><s-text type="strong">{data.summary.totals.awaiting ? money(data.summary.totals.awaiting) : "–"}</s-text></s-table-cell>
+                <s-table-cell />
+              </s-table-row>
+            </s-table-body>
+          </s-table>
         </s-section>
       )}
 

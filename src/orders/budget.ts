@@ -72,3 +72,38 @@ export function needsApproval(status: BudgetStatus, orderExGst: number): boolean
 }
 
 const cents = (n: number) => Math.round(n * 100) / 100;
+
+/** "YYYY-MM" n months after (or before, if negative) the given month. */
+export function addMonths(month: string, n: number): string {
+  const [y, m] = month.split("-").map(Number) as [number, number];
+  const i = y * 12 + (m - 1) + n;
+  return `${Math.floor(i / 12)}-${String((i % 12) + 1).padStart(2, "0")}`;
+}
+
+/** Short label for table headings: "Dec 2026". */
+export function shortMonthLabel(month: string): string {
+  const [y, m] = month.split("-").map(Number) as [number, number];
+  return new Date(Date.UTC(y, m - 1, 15)).toLocaleDateString("en-AU", { month: "short", year: "numeric", timeZone: "UTC" });
+}
+
+/** Calendar quarter ("2026-Q4" = Oct–Dec 2026; Australian FY quarters use the same months). */
+export interface Quarter {
+  key: string;
+  label: string;
+  months: [string, string, string];
+}
+
+export function quarterOf(month: string): Quarter {
+  const [y, m] = month.split("-").map(Number) as [number, number];
+  const q = Math.floor((m - 1) / 3) + 1;
+  const first = `${y}-${String((q - 1) * 3 + 1).padStart(2, "0")}`;
+  const months: [string, string, string] = [first, addMonths(first, 1), addMonths(first, 2)];
+  const short = (mm: string) => shortMonthLabel(mm).split(" ")[0];
+  return { key: `${y}-Q${q}`, label: `Q${q}: ${short(months[0])}–${short(months[2])} ${y}`, months };
+}
+
+/** Parses "2026-Q4"; null if it isn't one. */
+export function parseQuarter(key: string | null | undefined): Quarter | null {
+  const m = /^(\d{4})-Q([1-4])$/.exec(key ?? "");
+  return m ? quarterOf(`${m[1]}-${String((Number(m[2]) - 1) * 3 + 1).padStart(2, "0")}`) : null;
+}
