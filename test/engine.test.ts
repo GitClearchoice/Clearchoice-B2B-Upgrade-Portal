@@ -2,7 +2,8 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import { resolvePrice, sydneyDate } from "../src/pricing/engine.ts";
 import { applyDiscount, roundCents } from "../src/pricing/money.ts";
-import type { Customer, CustomerPriceRule, Product } from "../src/pricing/types.ts";
+import { priceBreaks } from "../src/pricing/breaks.ts";
+import type { Customer, CustomerPriceRule, Product, QuantityPrice } from "../src/pricing/types.ts";
 
 const product = (over: Partial<Product> = {}): Product => ({
   code: "BLADE350",
@@ -154,4 +155,31 @@ test("quantity price beats tier, respects dates, and %-off works from default pr
   assert.equal(resolvePrice({ product: product(), customer: customer(), quantity: 1, rules: [], quantityPrices: expired, at }).source, "tier");
   const withUnleashed = [{ ...base, id: "u", type: "discount" as const, value: 10, unleashedPrice: 31.5, minQty: 0 }];
   assert.equal(resolvePrice({ product: product(), customer: customer(), quantity: 1, rules: [], quantityPrices: withUnleashed, at }).unitExGst, 31.5);
+});
+
+// ---------- quantity breaks shown to buyers
+
+const qp = (over: Partial<QuantityPrice> = {}): QuantityPrice => ({
+  id: "q1", productCode: "BLADE350", type: "fixed", value: 250, unleashedPrice: null, minQty: 10, validFrom: null, validTo: null, ...over,
+});
+
+test("price breaks: quantity prices that beat the customer's tier", () => {
+  const c = customer({ tier: 1 }); // tier 1 = 280
+  const b = priceBreaks({ product: product(), customer: c, rules: [], quantityPrices: [qp(), qp({ id: "q2", minQty: 50, value: 230 })], at });
+  assert.deepEqual(b, [{ minQty: 10, unitExGst: 250 }, { minQty: 50, unitExGst: 230 }]);
+});
+
+test("price breaks: none when Customer Pricing overrides the quantity prices", () => {
+  const b = priceBreaks({ product: product(), customer: customer(), rules: [rule({ value: 199 })], quantityPrices: [qp()], at });
+  assert.deepEqual(b, []);
+});
+
+test("price breaks: customer pricing with minimum quantities, expired lines ignored", () => {
+  const rules = [
+    rule({ id: "a", value: 220, minQty: 0 }),
+    rule({ id: "b", value: 200, minQty: 5 }),
+    rule({ id: "c", value: 150, minQty: 20, validTo: "2026-01-01" }),
+  ];
+  const b = priceBreaks({ product: product(), customer: customer(), rules, quantityPrices: [], at });
+  assert.deepEqual(b, [{ minQty: 5, unitExGst: 200 }]);
 });

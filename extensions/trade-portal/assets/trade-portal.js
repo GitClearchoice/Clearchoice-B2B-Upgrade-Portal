@@ -29,15 +29,25 @@
     });
   }
 
-  function fetchPrices(proxy, location, lines) {
+  function fetchPrices(proxy, location, lines, withBreaks) {
     var q = lines.map(function (l) { return encodeURIComponent(l.sku) + ":" + l.quantity; }).join(",");
-    var url = proxy + "/prices?lines=" + q + (location ? "&location=" + encodeURIComponent(location) : "");
+    var url = proxy + "/prices?lines=" + q + (location ? "&location=" + encodeURIComponent(location) : "") + (withBreaks ? "&breaks=1" : "");
     return fetch(url, { headers: { Accept: "application/json" }, credentials: "same-origin" }).then(function (r) {
       return readJson(r).then(function (body) {
         if (!r.ok) throw new Error(body.error || "Prices unavailable");
         return body;
       });
     });
+  }
+
+  // "Buy 10+  $32.50 ea" lines for a product's quantity breaks; the one that applies is highlighted.
+  function breaksHtml(breaks, qty) {
+    if (!breaks || !breaks.length) return "";
+    var active = null;
+    breaks.forEach(function (b) { if (qty >= b.minQty) active = b; });
+    return "<ul class='cc-qty-breaks'>" + breaks.map(function (b) {
+      return "<li" + (b === active ? " class='is-active'" : "") + ">Buy " + b.minQty + "+ <span>" + money(b.unitExGst) + " ea</span></li>";
+    }).join("") + "</ul>";
   }
 
   // ---------- Cart change detection ----------
@@ -107,11 +117,11 @@
           return;
         }
         out.innerHTML = money(line.unitExGst) + " <small>" + esc("ex GST") + " (" + money(line.unitIncGst) + " inc GST)" +
-          (qty > 1 ? " each" : "") + "</small>";
+          (qty > 1 ? " each" : "") + "</small>" + breaksHtml(line.breaks, qty);
       };
       if (cache[key]) return show(cache[key]);
       out.textContent = "…";
-      fetchPrices(proxy, location, [{ sku: v.sku, quantity: qty }])
+      fetchPrices(proxy, location, [{ sku: v.sku, quantity: qty }], true)
         .then(function (body) { cache[key] = body; if (key === v.sku + ":" + currentQty()) show(body); })
         .catch(function (e) { out.textContent = e.message; });
     }
@@ -165,8 +175,9 @@
           var bySku = {};
           cartItems.forEach(function (i) { if (i.sku) bySku[i.sku] = (bySku[i.sku] || 0) + i.quantity; });
           var req = Object.keys(bySku).map(function (s) { return { sku: s, quantity: bySku[s] }; });
-          return (req.length ? fetchPrices(proxy, location, req) : Promise.resolve({ lines: [], errors: [] })).then(function (body) {
-            renderLines(body, noSku);
+          return (req.length ? fetchPrices(proxy, location, req, true) : Promise.resolve({ lines: [], errors: [] })).then(function (body) {
+            var shownInTheme = showThemeBreaks(body);
+            renderLines(body, noSku, shownInTheme);
             priced = !noSku.length && !(body.errors && body.errors.length) && body.lines.length > 0;
             submitEl.disabled = !priced;
           });
@@ -176,7 +187,41 @@
         });
     }
 
-    function renderLines(body, noSku) {
+    // Quantity breaks under each quantity box in the theme's cart. Returns false if the theme's
+    // quantity boxes can't be matched to cart lines (then they're shown in the trade table instead).
+    function showThemeBreaks(body) {
+      document.querySelectorAll(".cc-qty-breaks--theme").forEach(function (n) { n.remove(); });
+      var price = {};
+      (body.lines || []).forEach(function (l) { price[l.sku] = l; });
+      if (!(body.lines || []).some(function (l) { return l.breaks && l.breaks.length; })) return true;
+      var inputs = Array.prototype.filter.call(
+        document.querySelectorAll('input[name="updates[]"], input[name^="updates["], input[data-quantity-variant-id], cart-items input[name="quantity"], cart-drawer-items input[name="quantity"]'),
+        function (i) { return !el.contains(i); }
+      );
+      var matched = 0;
+      inputs.forEach(function (input, idx) {
+        var name = input.getAttribute("name") || "";
+        var m = name.match(/^updates\[(.+)\]$/);
+        var vid = input.getAttribute("data-quantity-variant-id");
+        var item = vid ? cartItems.filter(function (i) { return String(i.variant_id) === vid; })[0]
+          : m ? cartItems.filter(function (i) { return i.key === m[1] || String(i.variant_id) === m[1]; })[0]
+          : inputs.length === cartItems.length ? cartItems[idx] : null;
+        if (!item) return;
+        matched++;
+        var p = price[item.sku];
+        var html = p && breaksHtml(p.breaks, item.quantity);
+        if (!html) return;
+        var box = document.createElement("div");
+        box.innerHTML = html;
+        var list = box.firstChild;
+        list.classList.add("cc-qty-breaks--theme");
+        var anchor = input.closest("quantity-input, .quantity, .qty, .quantity-selector, .cart-item__quantity-wrapper") || input;
+        anchor.insertAdjacentElement("afterend", list);
+      });
+      return matched > 0;
+    }
+
+    function renderLines(body, noSku, breaksShownInTheme) {
       var price = {};
       (body.lines || []).forEach(function (l) { price[l.sku] = l; });
       var lineErr = {};
@@ -192,6 +237,7 @@
         }
         return "<tr><td>" + esc(i.product_title) + (i.variant_title ? " – " + esc(i.variant_title) : "") +
           "<br><small>" + esc(i.sku || "") + "</small>" +
+          (!breaksShownInTheme && p ? breaksHtml(p.breaks, i.quantity) : "") +
           (err ? "<div class='cc-trade-order__line-error'>" + esc(err) + "</div>" : "") +
           "</td><td class='num'>" + i.quantity + "</td><td class='num'>" + (p ? money(p.unitExGst) : "–") +
           "</td><td class='num'>" + (p ? money(lineEx) : "–") + "</td></tr>";

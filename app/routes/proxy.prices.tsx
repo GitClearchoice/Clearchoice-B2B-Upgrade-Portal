@@ -4,7 +4,8 @@ import { priceLines, priceStore } from "../pricing.server";
 import { BUYER_QUERY, BuyerError, buyerContext, parseLinesParam, type BuyerQueryData } from "../../src/b2b/buyer.ts";
 import { PricingError } from "../../src/pricing/engine.ts";
 
-// GET https://<shop>/apps/b2b/prices?lines=SKU:QTY,SKU:QTY&location=<site id>
+// GET https://<shop>/apps/b2b/prices?lines=SKU:QTY,SKU:QTY&location=<site id>[&breaks=1]
+// breaks=1 adds each line's quantity breaks for this buyer: [{ minQty, unitExGst }].
 // Shopify signs app proxy requests and adds logged_in_customer_id; prices are always worked out here.
 export const loader = async ({ request }: LoaderFunctionArgs) => {
   const { admin } = await authenticate.public.appProxy(request);
@@ -20,7 +21,8 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
     const buyer = buyerContext(data, url.searchParams.get("location"));
     if (!buyer) return json({ trade: false });
 
-    const priced = await priceLines(priceStore, buyer.site.customerCode, lines);
+    const breaks = url.searchParams.get("breaks") === "1";
+    const priced = await priceLines(priceStore, buyer.site.customerCode, lines, { breaks });
     return json({
       trade: true,
       company: buyer.companyName,
@@ -32,6 +34,7 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
         unitExGst: l.unitExGst,
         unitIncGst: l.unitIncGst,
         lineExGst: l.lineExGst,
+        ...(breaks ? { breaks: l.breaks ?? [] } : {}),
       })),
       goodsExGst: priced.goodsExGst,
       errors: priced.errors,

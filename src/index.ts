@@ -1,10 +1,12 @@
 import { PricingError, resolvePrice } from "./pricing/engine.ts";
+import { priceBreaks, type PriceBreak } from "./pricing/breaks.ts";
 import type { PricingSettings, ResolvedPrice } from "./pricing/types.ts";
 import type { PriceStore } from "./sync/store.ts";
 
 export * from "./unleashed/client.ts";
 export * from "./unleashed/signature.ts";
 export * from "./pricing/engine.ts";
+export * from "./pricing/breaks.ts";
 export * from "./pricing/types.ts";
 export * from "./sync/store.ts";
 export * from "./sync/sync.ts";
@@ -24,14 +26,15 @@ export async function priceLines(
   store: PriceStore,
   customerCode: string,
   lines: CartLine[],
-  opts: { at?: Date; settings?: Partial<PricingSettings> } = {},
-): Promise<{ lines: ResolvedPrice[]; goodsExGst: number; errors: { sku: string; error: string }[] }> {
+  opts: { at?: Date; settings?: Partial<PricingSettings>; breaks?: boolean } = {},
+): Promise<{ lines: (ResolvedPrice & { breaks?: PriceBreak[] })[]; goodsExGst: number; errors: { sku: string; error: string }[] }> {
   const customer = await store.getCustomer(customerCode);
   if (!customer) throw new PricingError(`Unknown customer ${customerCode}`);
   if (customer.obsolete) throw new PricingError(`Customer ${customerCode} is obsolete in Unleashed`);
   const rules = await store.getRulesForCustomer(customerCode);
 
-  const out: ResolvedPrice[] = [];
+  const out: (ResolvedPrice & { breaks?: PriceBreak[] })[] = [];
+  const { breaks, ...priceOpts } = opts;
   const errors: { sku: string; error: string }[] = [];
   for (const line of lines) {
     const product = await store.getProduct(line.sku);
@@ -41,7 +44,9 @@ export async function priceLines(
     }
     try {
       const quantityPrices = await store.getQuantityPrices(product.code);
-      out.push(resolvePrice({ product, customer, quantity: line.quantity, rules, quantityPrices, ...opts }));
+      const resolved: ResolvedPrice & { breaks?: PriceBreak[] } = resolvePrice({ product, customer, quantity: line.quantity, rules, quantityPrices, ...priceOpts });
+      if (breaks) resolved.breaks = priceBreaks({ product, customer, rules, quantityPrices, ...priceOpts });
+      out.push(resolved);
     } catch (e) {
       errors.push({ sku: line.sku, error: (e as Error).message });
     }
