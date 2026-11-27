@@ -105,6 +105,8 @@
     var formEl = el.querySelector("[data-cc-form]");
     var errEl = el.querySelector("[data-cc-error]");
     var submitEl = el.querySelector("[data-cc-submit]");
+    var poEl = el.querySelector("[data-cc-po]");
+    var noteEl = el.querySelector("[data-cc-note]");
     var doneEl = el.querySelector("[data-cc-done]");
     var requestKey = newKey();
     var cartItems = [];
@@ -179,11 +181,19 @@
         (noSku.length || (body.errors && body.errors.length) ? "<p class='cc-trade-order__line-error'>Remove the items marked above to place your order.</p>" : "");
     }
 
-    formEl.addEventListener("submit", function (e) {
+    // Enter in the PO field places the order (and must not submit the theme's cart form).
+    poEl.addEventListener("keydown", function (e) {
+      if (e.key === "Enter") { e.preventDefault(); submit(); }
+    });
+    submitEl.addEventListener("click", function (e) {
       e.preventDefault();
+      submit();
+    });
+
+    function submit() {
       if (busy || !priced) return;
-      var po = formEl.poNumber.value.trim();
-      if (poRequired && !po) { showError("Please enter a PO number."); formEl.poNumber.focus(); return; }
+      var po = poEl.value.trim();
+      if (poRequired && !po) { showError("Please enter a PO number."); poEl.focus(); return; }
       showError("");
       busy = true;
       submitEl.disabled = true;
@@ -205,7 +215,7 @@
               requestKey: requestKey,
               location: location,
               poNumber: po || "-",
-              note: formEl.note.value.trim(),
+              note: noteEl.value.trim(),
               lines: cartItems.map(function (i) { return { variantId: String(i.variant_id), quantity: i.quantity }; }),
             }),
           });
@@ -231,7 +241,7 @@
           busy = false;
           submitEl.textContent = "Place order";
         });
-    });
+    }
 
     // Themes update the cart with AJAX; re-price when the cart changes.
     document.addEventListener("cart:updated", load);
@@ -384,12 +394,19 @@
     document.addEventListener("click", function (e) { if (!panel.hidden && !el.contains(e.target)) open(false); });
   }
 
+  // One broken block (or a theme quirk) mustn't stop the others from working.
+  function each(selector, fn) {
+    document.querySelectorAll(selector).forEach(function (el) {
+      if (el.__ccInit) return;
+      el.__ccInit = true;
+      try { fn(el); } catch (e) { console.error("Clearchoice trade portal:", e); }
+    });
+  }
   function init() {
-    document.querySelectorAll("[data-cc-site-picker]").forEach(initSitePicker);
-    var cfg = document.querySelector("[data-cc-card-prices]");
-    if (cfg) initCardPrices(cfg);
-    document.querySelectorAll("[data-cc-trade-price]").forEach(initProductPrice);
-    document.querySelectorAll("[data-cc-trade-order]").forEach(initTradeOrder);
+    each("[data-cc-site-picker]", initSitePicker);
+    each("[data-cc-card-prices]", initCardPrices);
+    each("[data-cc-trade-price]", initProductPrice);
+    each("[data-cc-trade-order]", initTradeOrder);
   }
   if (document.readyState === "loading") document.addEventListener("DOMContentLoaded", init);
   else init();
