@@ -14,23 +14,47 @@
     <h2 class="cc-trade-order__heading">{{ block.settings.heading }}</h2>
     {%- if customer.company_available_locations_count > 1 -%}
       {%- comment -%}
-        Buyers who look after several sites pick the delivery site here. Shopify's own
-        url_to_set_as_current switches the buyer's current location; the page then reloads
-        and the cart is priced again for that site.
+        Buyers who look after several sites pick the delivery site here (with a search box when
+        there are many). Shopify's own url_to_set_as_current switches the buyer's current
+        location; the page then reloads and the cart is priced again for that site.
       {%- endcomment -%}
-      <label class="cc-trade-order__site cc-trade-order__site-picker">
-        Delivering to
-        <select data-cc-site-select onchange="if (this.value) window.location.href = this.value;">
-          {%- for loc in customer.company_available_locations -%}
-            <option
-              value="{% if loc.id == customer.current_location.id %}{% else %}{{ loc.url_to_set_as_current }}{% endif %}"
-              {% if loc.id == customer.current_location.id %}selected{% endif %}
+      <div class="cc-site-picker" data-cc-site-picker>
+        <div class="cc-site-picker__label">Delivering to</div>
+        <button type="button" class="cc-site-picker__current" data-cc-site-toggle aria-expanded="false">
+          <strong>{{ customer.current_location.name }}</strong>
+          <span class="cc-site-picker__change">Change site</span>
+        </button>
+        <div class="cc-site-picker__panel" data-cc-site-panel hidden>
+          {%- if customer.company_available_locations_count > 5 -%}
+            <input
+              type="search"
+              class="cc-site-picker__search"
+              placeholder="Search {{ customer.company_available_locations_count }} sites by name or suburb"
+              aria-label="Search sites"
+              autocomplete="off"
+              data-cc-site-search
             >
-              {{- loc.name -}}
-            </option>
-          {%- endfor -%}
-        </select>
-      </label>
+          {%- endif -%}
+          <ul class="cc-site-picker__list" data-cc-site-list>
+            {%- for loc in customer.company_available_locations -%}
+              {%- assign addr = loc.shipping_address -%}
+              {%- capture where -%}{{ addr.address1 }}{% if addr.city != blank %}, {{ addr.city }}{% endif %}{%- endcapture -%}
+              <li data-cc-site-item data-search="{{ loc.name | append: ' ' | append: where | downcase | escape }}">
+                {%- if loc.id == customer.current_location.id -%}
+                  <span class="cc-site-picker__item is-current" aria-current="true">
+                    {{- loc.name }} <small>{{ where }}</small> <em>(current)</em>
+                  </span>
+                {%- else -%}
+                  <a class="cc-site-picker__item" href="{{ loc.url_to_set_as_current }}">
+                    {{- loc.name }} <small>{{ where }}</small>
+                  </a>
+                {%- endif -%}
+              </li>
+            {%- endfor -%}
+          </ul>
+          <p class="cc-site-picker__empty" data-cc-site-empty hidden>No sites match your search.</p>
+        </div>
+      </div>
     {%- else -%}
       <p class="cc-trade-order__site">
         Delivering to <strong>{{ customer.current_location.name }}</strong>

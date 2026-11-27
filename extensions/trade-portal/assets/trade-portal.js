@@ -342,7 +342,50 @@
       .observe(document.body, { childList: true, subtree: true });
   }
 
+  // ---------- Site picker (cart page, buyers with several sites) ----------
+  function initSitePicker(el) {
+    var toggle = el.querySelector("[data-cc-site-toggle]");
+    var panel = el.querySelector("[data-cc-site-panel]");
+    var search = el.querySelector("[data-cc-site-search]");
+    var items = Array.prototype.slice.call(el.querySelectorAll("[data-cc-site-item]"));
+    var empty = el.querySelector("[data-cc-site-empty]");
+
+    function open(on) {
+      panel.hidden = !on;
+      toggle.setAttribute("aria-expanded", on ? "true" : "false");
+      if (on && search) search.focus();
+    }
+    function filter() {
+      var terms = search.value.toLowerCase().split(/\s+/).filter(Boolean);
+      var shown = 0;
+      items.forEach(function (li) {
+        var text = li.getAttribute("data-search") || "";
+        var match = terms.every(function (t) { return text.indexOf(t) !== -1; });
+        li.hidden = !match;
+        if (match) shown++;
+      });
+      empty.hidden = shown > 0;
+    }
+
+    toggle.addEventListener("click", function () { open(panel.hidden); });
+    if (search) {
+      search.addEventListener("input", filter);
+      search.addEventListener("keydown", function (e) {
+        if (e.key === "Enter") {
+          // Enter picks the first matching site.
+          e.preventDefault();
+          var first = items.filter(function (li) { return !li.hidden; })[0];
+          var link = first && first.querySelector("a");
+          if (link) window.location.href = link.href;
+        }
+      });
+    }
+    document.addEventListener("keydown", function (e) { if (e.key === "Escape" && !panel.hidden) { open(false); toggle.focus(); } });
+    document.addEventListener("click", function (e) { if (!panel.hidden && !el.contains(e.target)) open(false); });
+  }
+
   function init() {
+    document.querySelectorAll("[data-cc-site-picker]").forEach(initSitePicker);
     var cfg = document.querySelector("[data-cc-card-prices]");
     if (cfg) initCardPrices(cfg);
     document.querySelectorAll("[data-cc-trade-price]").forEach(initProductPrice);
