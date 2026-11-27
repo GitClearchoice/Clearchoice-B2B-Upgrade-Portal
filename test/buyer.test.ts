@@ -47,3 +47,11 @@ test("parseLinesParam", () => {
   assert.throws(() => parseLinesParam("X:0"), BuyerError);
   assert.throws(() => parseLinesParam("X:1.5"), BuyerError);
 });
+
+test("closed sites are left out and can't be ordered for", () => {
+  const closed = { companyLocation: { ...loc(1, "Airport").companyLocation, closed: { value: "true" } } };
+  const b = buyerContext(data("ASSET", [closed, loc(2, "Westpoint")]))!;
+  assert.deepEqual(b.sites.map((s) => s.name), ["Westpoint"]);
+  assert.throws(() => buyerContext(data("ASSET", [closed, loc(2, "Westpoint")]), "1"), /closed/);
+  assert.throws(() => buyerContext(data("ASSET", [closed])), /no open sites/);
+});

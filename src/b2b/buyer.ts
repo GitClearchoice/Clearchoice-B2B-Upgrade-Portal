@@ -21,6 +21,7 @@ export const BUYER_QUERY = `#graphql
               id
               name
               code: metafield(namespace: "unleashed", key: "customer_code") { value }
+              closed: metafield(namespace: "b2b", key: "closed") { value }
             }
           }
         }
@@ -37,7 +38,7 @@ export interface BuyerQueryData {
       id: string;
       company: { id: string; name: string; code: { value: string } | null };
       roleAssignments: {
-        nodes: { companyLocation: { id: string; name: string; code: { value: string } | null } | null }[];
+        nodes: { companyLocation: { id: string; name: string; code: { value: string } | null; closed?: { value: string } | null } | null }[];
       };
     }[];
   } | null;
@@ -81,12 +82,13 @@ export function buyerContext(data: BuyerQueryData, locationId?: string | null): 
     const loc = n.companyLocation;
     if (!loc || seen.has(loc.id)) continue;
     seen.add(loc.id);
+    if (loc.closed?.value === "true") continue; // site closed (obsolete in Unleashed, or closed by the customer)
     const customerCode = loc.code?.value?.trim() || companyCode;
     if (!customerCode) continue; // not linked to Unleashed: can't price or order
     sites.push({ id: loc.id, name: loc.name, customerCode });
   }
   if (sites.length === 0) {
-    throw new BuyerError(`${profile.company.name} has no sites linked to an Unleashed customer`);
+    throw new BuyerError(`${profile.company.name} has no open sites linked to an Unleashed customer`);
   }
   sites.sort((a, b) => a.name.localeCompare(b.name));
 
@@ -94,7 +96,7 @@ export function buyerContext(data: BuyerQueryData, locationId?: string | null): 
   if (locationId) {
     const want = locationId.startsWith("gid://") ? locationId : `gid://shopify/CompanyLocation/${locationId}`;
     const hit = sites.find((s) => s.id === want);
-    if (!hit) throw new BuyerError("That site isn't one you can order for");
+    if (!hit) throw new BuyerError("That site isn't one you can order for (it may have been closed). Please choose another site.");
     site = hit;
   }
   return {

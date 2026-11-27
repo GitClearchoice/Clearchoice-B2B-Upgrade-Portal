@@ -29,7 +29,7 @@
             <input
               type="search"
               class="cc-site-picker__search"
-              placeholder="Search {{ customer.company_available_locations_count }} sites by name or suburb"
+              placeholder="Search sites by name or suburb"
               aria-label="Search sites"
               autocomplete="off"
               data-cc-site-search
@@ -37,6 +37,8 @@
           {%- endif -%}
           <ul class="cc-site-picker__list" data-cc-site-list>
             {%- for loc in customer.company_available_locations -%}
+              {%- comment -%} Closed sites (obsolete in Unleashed, or closed by the customer) aren't offered. {%- endcomment -%}
+              {%- if loc.metafields.b2b.closed.value == true and loc.id != customer.current_location.id -%}{%- continue -%}{%- endif -%}
               {%- assign addr = loc.shipping_address -%}
               {%- capture where -%}{{ addr.address1 }}{% if addr.city != blank %}, {{ addr.city }}{% endif %}{%- endcapture -%}
               <li data-cc-site-item data-search="{{ loc.name | append: ' ' | append: where | downcase | escape }}">
@@ -60,6 +62,9 @@
         Delivering to <strong>{{ customer.current_location.name }}</strong>
         {%- if customer.current_company %} ({{ customer.current_company.name }}){% endif -%}
       </p>
+    {%- endif -%}
+    {%- if customer.current_location.metafields.b2b.closed.value == true -%}
+      <p class="cc-trade-order__error">This delivery site has been closed. Please choose another site above, or contact Clearchoice.</p>
     {%- endif -%}
     {%- comment -%} Site budget for this month (filled in by trade-portal.js; hidden when the site has no budget). {%- endcomment -%}
     <div class="cc-budget" data-cc-budget hidden></div>

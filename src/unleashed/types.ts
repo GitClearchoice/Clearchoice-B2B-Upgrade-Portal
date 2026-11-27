@@ -109,6 +109,7 @@ export interface USalesOrder {
   OrderDate?: string | null;
   OrderStatus?: string | null;
   Customer?: { CustomerCode?: string | null } | null;
+  DeliveryName?: string | null;
 }
 
 export interface UWarehouse {

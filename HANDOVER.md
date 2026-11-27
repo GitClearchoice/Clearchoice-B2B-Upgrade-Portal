@@ -76,6 +76,12 @@ Upload this file to the new Claude project, then start a chat with:
 - Cart: budget tracker under the delivery site (`GET /apps/b2b/budget`): budget, already ordered, this order, remaining or over by, waiting for approval; over budget turns red and the button says **Send for approval**.
 - Migration `20261128000000_budgets` (checked against Postgres 16: applies cleanly, no drift). 102 tests pass.
 
+**Closed and dormant sites (28 Nov).** Unleashed stays the master list of sites.
+- A site whose Unleashed delivery address is obsolete (or removed from a customer that still has a Delivery tab), or whose customer is obsolete, is switched off: location metafield `b2b.closed` = true + `SiteStatus` row. It's hidden from the cart site picker, can't be ordered for (`buyerContext` skips it), and is hidden from Site budgets and the quarterly summary. Reactivated in Unleashed → reopened automatically. Never deleted (history kept).
+- Runs daily in the web process (15 min after start, then every 24 h) and from **Site budgets → "Check Unleashed for closed sites now"**. Closed sites: "Show closed sites" → why/when/by whom, **Reopen**.
+- **Dormant** badge on Site budgets: no order for **6 months** (Unleashed sales orders matched on customer code + delivery name, plus portal orders; recorded by the daily check).
+- Head-office admin closes a site: `POST /apps/b2b/sites/close` (only the company's budget approver) → switched off at once + staff emailed to obsolete it in Unleashed. Button comes with the phase 5 customer budgets page.
+
 **Phase 4 next:**
 1. You: Postmark account → add sender signature / domain **clearchoiceproducts.com**, add its DKIM and Return-Path DNS records, create a Server and copy its **Server API token**.
 2. You: on Render, web service → Environment: `POSTMARK_SERVER_TOKEN` (the token) and `STAFF_EMAIL` (who gets failed orders). Blueprint → Manual Sync if the new keys don't appear. (Until the token is set, emails only go to the Render log.)

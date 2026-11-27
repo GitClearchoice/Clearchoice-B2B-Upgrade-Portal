@@ -5,6 +5,9 @@ import { authenticate } from "../shopify.server";
 import prisma from "../db.server";
 import { addMonths, monthLabel, parseQuarter, quarterOf, shortMonthLabel, sydneyMonth, sydneyMonthRange } from "../../src/orders/budget.ts";
 import { COMMITTED } from "../budget.server";
+import { graphqlFor } from "../orders.server";
+import { setSiteClosed, syncSites } from "../sites.server";
+import { isDormant } from "../../src/b2b/siteStatus.ts";
 
 // Staff page: monthly site budgets per company (goods ex GST, Sydney calendar month).
 // "Every month" is the default; a month's own amount (this month + next 3) overrides it.
@@ -97,7 +100,23 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
 
   if (!companyId) return { q, companies, company: null, months: ms, labels, quarter: null, summary: null };
 
-  const { name, sites } = await companySites(admin, companyId);
+  const { name, sites: allSites } = await companySites(admin, companyId);
+  // Closed sites (obsolete in Unleashed, or closed by the customer) are hidden; dormant = no order in 6 months.
+  const statuses = await prisma.siteStatus.findMany({ where: { shop: session.shop, companyId } });
+  const statusOf = new Map(statuses.map((st) => [st.locationId, st]));
+  const sites = allSites.filter((st) => !statusOf.get(st.id)?.closed);
+  const now = new Date();
+  const closedSites = allSites
+    .filter((st) => statusOf.get(st.id)?.closed)
+    .map((st) => {
+      const x = statusOf.get(st.id)!;
+      return { id: st.id, name: st.name, source: x.source, reason: x.reason, closedBy: x.closedBy, closedAt: x.closedAt?.toISOString() ?? null };
+    });
+  const siteInfo = (id: string) => {
+    const x = statusOf.get(id);
+    const checked = !!x; // the daily check has seen this site
+    return { lastOrderAt: x?.lastOrderAt?.toISOString() ?? null, dormant: checked && isDormant(x?.lastOrderAt ?? null, now) };
+  };
   const rows = await prisma.siteBudget.findMany({
     where: { shop: session.shop, companyId, month: { in: ["default", ...new Set([...ms, ...quarter.months])] } },
   });
@@ -153,7 +172,9 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
     company: {
       id: companyId,
       name,
-      sites: sites.map((s) => ({ ...s, default: val(s.id, "default"), months: ms.map((m) => val(s.id, m)) })),
+      sites: sites.map((s) => ({ ...s, ...siteInfo(s.id), default: val(s.id, "default"), months: ms.map((m) => val(s.id, m)) })),
+      closedSites,
+      showClosed: url.searchParams.get("closed") === "1",
     },
     orders: orders.map((o) => ({ ...o, goodsExGst: Number(o.goodsExGst.toString()), createdAt: o.createdAt.toISOString() })),
   };
@@ -164,6 +185,25 @@ export const action = async ({ request }: ActionFunctionArgs) => {
   const form = await request.formData();
   const companyId = String(form.get("company") ?? "");
   if (!companyId) return { error: "No company selected" };
+  const intent = String(form.get("intent") ?? "save");
+  if (intent === "sync") {
+    try {
+      const r = await syncSites(graphqlFor(admin), session.shop);
+      return { synced: `Checked ${r.sites} sites against Unleashed: ${r.closed.length} closed, ${r.reopened.length} reopened.${r.errors.length ? ` ${r.errors.length} errors: ${r.errors.slice(0, 3).join("; ")}` : ""}` };
+    } catch (e) {
+      return { error: `Unleashed check failed: ${(e as Error).message}` };
+    }
+  }
+  if (intent === "reopen") {
+    const locationId = String(form.get("location") ?? "");
+    const siteName = String(form.get("siteName") ?? "");
+    await setSiteClosed(graphqlFor(admin), session.shop, { locationId, companyId, name: siteName }, false, {
+      source: "staff",
+      reason: "reopened by Clearchoice staff",
+      by: session.onlineAccessInfo?.associated_user?.email ?? "staff",
+    });
+    return { synced: `${siteName} reopened.` };
+  }
   const ms = months();
   const { sites } = await companySites(admin, companyId);
   const allDefault = String(form.get("allDefault") ?? "").trim();
@@ -254,6 +294,23 @@ export default function Budgets() {
           </s-paragraph>
           {result && "error" in result && <s-banner tone="critical">{result.error}</s-banner>}
           {result && "saved" in result && <s-banner tone="success">Budgets saved.</s-banner>}
+          {result && "synced" in result && <s-banner tone="success">{result.synced}</s-banner>}
+          <s-stack direction="inline" gap="base">
+            <s-text>
+              "Dormant" = no order for 6 months (Unleashed orders and portal orders; checked daily).
+              {data.company.closedSites.length > 0 && ` ${data.company.closedSites.length} closed site(s) hidden.`}
+            </s-text>
+            {data.company.closedSites.length > 0 && (
+              <s-link href={`/app/budgets?q=${encodeURIComponent(data.q)}&company=${encodeURIComponent(data.company.id)}${data.company.showClosed ? "" : "&closed=1"}`}>
+                {data.company.showClosed ? "Hide closed sites" : "Show closed sites"}
+              </s-link>
+            )}
+            <Form method="post">
+              <input type="hidden" name="company" value={data.company.id} />
+              <input type="hidden" name="intent" value="sync" />
+              <s-button type="submit" variant="tertiary" {...(busy ? { loading: true } : {})}>Check Unleashed for closed sites now</s-button>
+            </Form>
+          </s-stack>
           <Form method="post" key={params.toString() + (result && "saved" in result ? Date.now() : "")}>
             <input type="hidden" name="company" value={data.company.id} />
             <s-stack direction="block" gap="base">
@@ -267,7 +324,16 @@ export default function Budgets() {
                 <s-table-body>
                   {data.company.sites.map((s) => (
                     <s-table-row key={s.id}>
-                      <s-table-cell>{s.name}</s-table-cell>
+                      <s-table-cell>
+                        {s.name}
+                        {s.dormant && (
+                          <>
+                            {" "}
+                            <s-badge tone="warning">Dormant</s-badge>
+                            <s-text color="subdued">{s.lastOrderAt ? ` Last order ${new Date(s.lastOrderAt).toLocaleDateString("en-AU", { timeZone: "Australia/Sydney" })}` : " No orders found"}</s-text>
+                          </>
+                        )}
+                      </s-table-cell>
                       <s-table-cell><s-text-field label="Every month" labelAccessibilityVisibility="exclusive" name={`default:${s.id}`} value={s.default?.toString() ?? ""} /></s-table-cell>
                       {s.months.map((v, i) => (
                         <s-table-cell key={i}><s-text-field label={data.labels[i]!} labelAccessibilityVisibility="exclusive" name={`m${i}:${s.id}`} value={v?.toString() ?? ""} /></s-table-cell>
@@ -279,6 +345,38 @@ export default function Budgets() {
               <s-button type="submit" variant="primary" {...(busy ? { loading: true } : {})}>Save budgets</s-button>
             </s-stack>
           </Form>
+        </s-section>
+      )}
+
+      {data.company && data.company.showClosed && data.company.closedSites.length > 0 && (
+        <s-section heading="Closed sites (hidden)">
+          <s-table>
+            <s-table-header-row>
+              <s-table-header>Site</s-table-header>
+              <s-table-header>Why</s-table-header>
+              <s-table-header>Closed</s-table-header>
+              <s-table-header />
+            </s-table-header-row>
+            <s-table-body>
+              {data.company.closedSites.map((c) => (
+                <s-table-row key={c.id}>
+                  <s-table-cell>{c.name}</s-table-cell>
+                  <s-table-cell>{c.source === "customer" ? `Closed by the customer${c.reason ? `: ${c.reason}` : ""}` : c.reason ?? c.source}</s-table-cell>
+                  <s-table-cell>{c.closedAt ? new Date(c.closedAt).toLocaleDateString("en-AU", { timeZone: "Australia/Sydney" }) : ""}{c.closedBy ? ` (${c.closedBy})` : ""}</s-table-cell>
+                  <s-table-cell>
+                    <Form method="post">
+                      <input type="hidden" name="company" value={data.company!.id} />
+                      <input type="hidden" name="intent" value="reopen" />
+                      <input type="hidden" name="location" value={c.id} />
+                      <input type="hidden" name="siteName" value={c.name} />
+                      <s-button type="submit" variant="tertiary">Reopen</s-button>
+                    </Form>
+                  </s-table-cell>
+                </s-table-row>
+              ))}
+            </s-table-body>
+          </s-table>
+          <s-paragraph>A site closed because it's obsolete in Unleashed reopens by itself when it's made active there again.</s-paragraph>
         </s-section>
       )}
 

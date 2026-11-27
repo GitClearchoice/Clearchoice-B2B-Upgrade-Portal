@@ -137,7 +137,7 @@ export class UnleashedClient {
    */
   async *salesOrders(opts: { startDate: string; endDate?: string }): AsyncGenerator<USalesOrder> {
     for await (const o of this.paginate<USalesOrder>("SalesOrders", { startDate: opts.startDate, endDate: opts.endDate })) {
-      yield { OrderNumber: o.OrderNumber, OrderDate: o.OrderDate, OrderStatus: o.OrderStatus, Customer: { CustomerCode: o.Customer?.CustomerCode } };
+      yield { OrderNumber: o.OrderNumber, OrderDate: o.OrderDate, OrderStatus: o.OrderStatus, Customer: { CustomerCode: o.Customer?.CustomerCode }, DeliveryName: o.DeliveryName };
     }
   }
 

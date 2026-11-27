@@ -147,3 +147,24 @@ model SiteBudget {
   @@unique([shop, locationId, month])
   @@index([shop, companyId])
 }
+
+// Delivery sites switched off in the portal (obsolete in Unleashed, or closed by the customer/staff),
+// and each site's last order date (for "dormant": no order in 6 months). Mirrors the location
+// metafield b2b.closed, which the storefront and buyer checks read.
+model SiteStatus {
+  id          String    @id @default(cuid())
+  shop        String
+  companyId   String
+  locationId  String
+  siteName    String
+  closed      Boolean   @default(false)
+  source      String? // unleashed | customer | staff
+  reason      String?
+  closedAt    DateTime?
+  closedBy    String?
+  lastOrderAt DateTime?
+  updatedAt   DateTime  @updatedAt
+
+  @@unique([shop, locationId])
+  @@index([shop, companyId])
+}

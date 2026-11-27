@@ -152,3 +152,13 @@ export function unleashedFailedEmail(o: OrderSummary, attempts: number, error: s
     text: `${intro}\n\nError: ${error}\n\n${detailsText(o)}\n\n${linesText(o)}`,
   };
 }
+
+export function siteClosedEmail(p: { companyName: string; siteName: string; customerCode: string | null; closedBy: string; reason?: string | null }): Email {
+  const subject = `Site closed by customer: ${p.companyName} – ${p.siteName}`;
+  const intro = `${p.closedBy} has closed the delivery site "${p.siteName}" for ${p.companyName} in the trade portal. It's no longer available for ordering. Please mark the delivery address obsolete in Unleashed${p.customerCode ? ` (customer ${p.customerCode})` : ""}.`;
+  return {
+    subject,
+    html: layout("Delivery site closed", `<p>${esc(intro)}</p>${p.reason ? `<p>Their note: <b>${esc(p.reason)}</b></p>` : ""}<p style="font-size:13px;color:#555">If this was a mistake, reopen the site from the app's Site budgets page (Show closed sites).</p>`),
+    text: `${intro}\n${p.reason ? `\nTheir note: ${p.reason}\n` : ""}\nIf this was a mistake, reopen the site from the app's Site budgets page (Show closed sites).`,
+  };
+}

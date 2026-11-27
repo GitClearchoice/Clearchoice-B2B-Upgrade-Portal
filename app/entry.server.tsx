@@ -6,9 +6,11 @@ import { type EntryContext } from "react-router";
 import { isbot } from "isbot";
 import { addDocumentResponseHeaders } from "./shopify.server";
 import { startOrderRetryLoop } from "./orders.server";
+import { startSiteSyncLoop } from "./sites.server";
 
 // Retries trade orders that didn't reach Unleashed (every 5 minutes).
 startOrderRetryLoop();
+startSiteSyncLoop();
 
 export const streamTimeout = 5000;
 
