@@ -20,6 +20,18 @@
     {%- endif -%}
   </style>
   <script>document.documentElement.classList.add("cc-trade-buyer");</script>
+  {%- if block.settings.hide_theme_prices and block.settings.price_selector != blank -%}
+    {%- comment -%} Trade prices on product cards (recently viewed, collections, search). {%- endcomment -%}
+    <div
+      hidden
+      data-cc-card-prices
+      data-proxy="/apps/b2b"
+      data-location="{{ customer.current_location.id }}"
+      data-selector="{{ block.settings.price_selector | escape }}"
+    ></div>
+    <script src="{{ 'trade-portal.js' | asset_url }}" defer></script>
+    {{ 'trade-portal.css' | asset_url | stylesheet_tag }}
+  {%- endif -%}
 {%- endif -%}
 
 {% schema %}

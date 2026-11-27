@@ -13,3 +13,5 @@
 .cc-trade-order__error { color: #b00020; }
 .cc-trade-order__terms { font-size: .85em; opacity: .7; }
 .cc-trade-order__line-error { color: #b00020; font-size: .85em; }
+.cc-card-price { font-weight: 600; margin-top: .25rem; }
+.cc-card-price small { font-weight: 400; opacity: .75; }

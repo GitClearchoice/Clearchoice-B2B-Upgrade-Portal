@@ -239,7 +239,112 @@
     load();
   }
 
+  // ---------- Product cards (recently viewed, collections, search, recommendations) ----------
+  // The embed hides the theme's retail prices for trade buyers; this puts the trade price
+  // (qty 1, ex GST) next to each hidden card price. Cards are found by their /products/ link.
+  function initCardPrices(cfg) {
+    var proxy = cfg.dataset.proxy;
+    var location = cfg.dataset.location;
+    var selector = cfg.dataset.selector;
+    if (!selector) return;
+    var root = (window.Shopify && Shopify.routes && Shopify.routes.root) || "/";
+    var productCache = {}; // handle -> Promise<variants>
+    var priceCache = {}; // sku -> line | null
+    var timer;
+
+    function handleOf(card) {
+      var a = card.querySelector('a[href*="/products/"]');
+      var m = a && a.getAttribute("href").match(/\/products\/([^/?#]+)/);
+      if (!m) return null;
+      var v = a.getAttribute("href").match(/[?&]variant=(\d+)/);
+      return { handle: decodeURIComponent(m[1]), variant: v && v[1] };
+    }
+    function cardOf(el) {
+      // Nearest ancestor holding a product link (a card), at most 8 levels up.
+      var n = el.parentElement;
+      for (var i = 0; n && i < 8; i++, n = n.parentElement) {
+        if (n.querySelector('a[href*="/products/"]')) return n;
+      }
+      return null;
+    }
+    function skip(el) {
+      if (el.hasAttribute("data-cc-card-done")) return true;
+      if (el.parentElement && el.parentElement.closest(selector)) return true; // nested price element
+      // Main product (has the Trade price block) and the cart (Trade order block prices it).
+      var section = el.closest(".shopify-section");
+      if (section && section.querySelector("[data-cc-trade-price]")) return true;
+      if (el.closest('form[action$="/cart"], cart-drawer, cart-items, cart-drawer-items, [data-cc-trade-order]')) return true;
+      return false;
+    }
+    function variantsOf(handle) {
+      if (!productCache[handle]) {
+        productCache[handle] = fetch(root + "products/" + encodeURIComponent(handle) + ".js", { headers: { Accept: "application/json" } })
+          .then(function (r) { return r.ok ? r.json() : { variants: [] }; })
+          .then(function (p) { return (p.variants || []).filter(function (v) { return v.sku; }).slice(0, 10); })
+          .catch(function () { return []; });
+      }
+      return productCache[handle];
+    }
+    function priceSkus(skus) {
+      var todo = skus.filter(function (k, i) { return !(k in priceCache) && skus.indexOf(k) === i; });
+      var chunks = [];
+      for (var i = 0; i < todo.length; i += 40) chunks.push(todo.slice(i, i + 40));
+      return Promise.all(chunks.map(function (chunk) {
+        return fetchPrices(proxy, location, chunk.map(function (k) { return { sku: k, quantity: 1 }; }))
+          .then(function (body) {
+            chunk.forEach(function (k) { priceCache[k] = null; });
+            (body.lines || []).forEach(function (l) { priceCache[l.sku] = l; });
+          })
+          .catch(function () {});
+      }));
+    }
+    function label(variants, preferred) {
+      var chosen = preferred && variants.filter(function (v) { return String(v.id) === preferred; });
+      var list = chosen && chosen.length ? chosen : variants;
+      var prices = list.map(function (v) { return priceCache[v.sku]; }).filter(Boolean).map(function (l) { return l.unitExGst; });
+      if (!prices.length) return null;
+      var min = Math.min.apply(null, prices);
+      var from = prices.some(function (p) { return p !== min; });
+      return (from ? "From " : "") + money(min) + " <small>ex GST</small>";
+    }
+
+    function scan() {
+      var jobs = [];
+      document.querySelectorAll(selector).forEach(function (el) {
+        if (skip(el)) return;
+        var card = cardOf(el);
+        var h = card && handleOf(card);
+        el.setAttribute("data-cc-card-done", "");
+        if (!h) return;
+        var out = document.createElement("div");
+        out.className = "cc-card-price";
+        out.textContent = "…";
+        el.insertAdjacentElement("afterend", out);
+        jobs.push(variantsOf(h.handle).then(function (variants) { return { out: out, variants: variants, preferred: h.variant }; }));
+      });
+      if (!jobs.length) return;
+      Promise.all(jobs).then(function (items) {
+        var skus = [];
+        items.forEach(function (it) { it.variants.forEach(function (v) { skus.push(v.sku); }); });
+        return priceSkus(skus).then(function () {
+          items.forEach(function (it) {
+            var html = label(it.variants, it.preferred);
+            if (html) it.out.innerHTML = html;
+            else it.out.remove();
+          });
+        });
+      });
+    }
+
+    scan();
+    // Recently viewed, recommendations and infinite scroll are added after the page loads.
+    new MutationObserver(function () { clearTimeout(timer); timer = setTimeout(scan, 200); })
+      .observe(document.body, { childList: true, subtree: true });
+  }
+
   function init() {
+    var cfg = document.querySelector("[data-cc-card-prices]");
+    if (cfg) initCardPrices(cfg);
     document.querySelectorAll("[data-cc-trade-price]").forEach(initProductPrice);
     document.querySelectorAll("[data-cc-trade-order]").forEach(initTradeOrder);
   }
