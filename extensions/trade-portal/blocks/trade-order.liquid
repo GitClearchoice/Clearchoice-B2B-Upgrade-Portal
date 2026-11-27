@@ -12,10 +12,31 @@
     {{ block.shopify_attributes }}
   >
     <h2 class="cc-trade-order__heading">{{ block.settings.heading }}</h2>
-    <p class="cc-trade-order__site">
-      Delivering to <strong>{{ customer.current_location.name }}</strong>
-      {%- if customer.current_company %} ({{ customer.current_company.name }}){% endif -%}
-    </p>
+    {%- if customer.company_available_locations_count > 1 -%}
+      {%- comment -%}
+        Buyers who look after several sites pick the delivery site here. Shopify's own
+        url_to_set_as_current switches the buyer's current location; the page then reloads
+        and the cart is priced again for that site.
+      {%- endcomment -%}
+      <label class="cc-trade-order__site cc-trade-order__site-picker">
+        Delivering to
+        <select data-cc-site-select onchange="if (this.value) window.location.href = this.value;">
+          {%- for loc in customer.company_available_locations -%}
+            <option
+              value="{% if loc.id == customer.current_location.id %}{% else %}{{ loc.url_to_set_as_current }}{% endif %}"
+              {% if loc.id == customer.current_location.id %}selected{% endif %}
+            >
+              {{- loc.name -}}
+            </option>
+          {%- endfor -%}
+        </select>
+      </label>
+    {%- else -%}
+      <p class="cc-trade-order__site">
+        Delivering to <strong>{{ customer.current_location.name }}</strong>
+        {%- if customer.current_company %} ({{ customer.current_company.name }}){% endif -%}
+      </p>
+    {%- endif -%}
     <div data-cc-lines><p>Loading your prices…</p></div>
     <form class="cc-trade-order__form" data-cc-form novalidate>
       <label>
