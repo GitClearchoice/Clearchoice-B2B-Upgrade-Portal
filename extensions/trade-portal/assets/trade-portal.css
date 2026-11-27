@@ -49,19 +49,23 @@ a.cc-site-picker__item:hover, a.cc-site-picker__item:focus { background: rgba(0,
 .cc-budget__rows dd { margin: 0; text-align: right; white-space: nowrap; }
 .cc-budget__warn { color: #b00020; font-weight: 600; margin: .6rem 0 0; }
 .cc-budget__note { font-size: .85em; opacity: .7; margin: .4rem 0 0; }
-/* Phones: cart lines as stacked rows (name on top, then qty / unit / total), totals as label–value rows. */
-@media (max-width: 600px) {
-  .cc-lines-table, .cc-lines-table tbody, .cc-lines-table tfoot { display: block; width: 100%; }
-  .cc-lines-table thead { display: none; }
-  .cc-lines-table tbody tr { display: grid; grid-template-columns: auto 1fr auto; gap: .2rem .75rem; padding: .6rem 0; border-bottom: 1px solid rgba(0,0,0,.08); }
-  .cc-lines-table tbody td { padding: 0; border: 0; }
-  .cc-lines-table tbody td:first-child { grid-column: 1 / -1; font-weight: 600; overflow-wrap: anywhere; }
-  .cc-lines-table tbody td.num { text-align: left; white-space: normal; }
-  .cc-lines-table tbody td.num:last-child { text-align: right; font-weight: 600; }
-  .cc-lines-table tbody td.num::before { content: attr(data-label) " "; font-weight: 400; opacity: .65; font-size: .85em; }
-  .cc-lines-table tfoot tr { display: flex; justify-content: space-between; }
-  .cc-lines-table tfoot td { padding: .35rem 0; }
-  .cc-lines-table tfoot td:empty { display: none; }
+/* Phones: cart lines as stacked rows (name on top, then qty / each / total), totals as label–value rows.
+   Scoped to the block and !important on layout, because themes often style every table (cell borders,
+   display: table-row) and would otherwise win. */
+@media (max-width: 749px) {
+  .cc-trade-order table.cc-lines-table,
+  .cc-trade-order table.cc-lines-table tbody,
+  .cc-trade-order table.cc-lines-table tfoot { display: block !important; width: 100% !important; border: 0 !important; }
+  .cc-trade-order table.cc-lines-table thead { display: none !important; }
+  .cc-trade-order table.cc-lines-table tbody tr { display: grid !important; grid-template-columns: auto 1fr auto; gap: .2rem .75rem; padding: .7rem 0; border: 0 !important; border-bottom: 1px solid rgba(127,127,127,.3) !important; }
+  .cc-trade-order table.cc-lines-table td { display: block !important; padding: 0 !important; border: 0 !important; width: auto !important; min-width: 0; }
+  .cc-trade-order table.cc-lines-table tbody td:first-child { grid-column: 1 / -1; font-weight: 600; overflow-wrap: break-word; word-break: normal; }
+  .cc-trade-order table.cc-lines-table tbody td.num { text-align: left !important; white-space: normal; }
+  .cc-trade-order table.cc-lines-table tbody td.num:last-child { text-align: right !important; font-weight: 600; }
+  .cc-trade-order table.cc-lines-table tbody td.num::before { content: attr(data-label) " "; font-weight: 400; opacity: .65; font-size: .85em; }
+  .cc-trade-order table.cc-lines-table tfoot tr { display: flex !important; justify-content: space-between; border: 0 !important; }
+  .cc-trade-order table.cc-lines-table tfoot td { padding: .35rem 0 !important; }
+  .cc-trade-order table.cc-lines-table tfoot td:empty { display: none !important; }
   .cc-trade-order__label-one-line { white-space: normal; }
   .cc-trade-order .cc-trade-order__submit { width: 100%; }
   .cc-site-picker__current { align-items: flex-start; }
