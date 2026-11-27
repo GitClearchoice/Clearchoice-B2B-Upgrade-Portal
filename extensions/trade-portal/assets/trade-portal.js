@@ -17,11 +17,23 @@
     return window.crypto && crypto.randomUUID ? crypto.randomUUID() : Date.now().toString(36) + "-" + Math.random().toString(36).slice(2, 12);
   };
 
+  // Read a JSON response; if the app or Shopify sent back a page instead (error, 404), say so plainly.
+  function readJson(r) {
+    return r.text().then(function (text) {
+      try {
+        return JSON.parse(text);
+      } catch (e) {
+        console.error("Clearchoice trade portal: expected JSON from " + r.url + " (HTTP " + r.status + "), got:", text.slice(0, 500));
+        throw new Error("Prices unavailable (HTTP " + r.status + "). Please try again shortly.");
+      }
+    });
+  }
+
   function fetchPrices(proxy, location, lines) {
     var q = lines.map(function (l) { return encodeURIComponent(l.sku) + ":" + l.quantity; }).join(",");
     var url = proxy + "/prices?lines=" + q + (location ? "&location=" + encodeURIComponent(location) : "");
     return fetch(url, { headers: { Accept: "application/json" }, credentials: "same-origin" }).then(function (r) {
-      return r.json().then(function (body) {
+      return readJson(r).then(function (body) {
         if (!r.ok) throw new Error(body.error || "Prices unavailable");
         return body;
       });
@@ -198,7 +210,7 @@
             }),
           });
         })
-        .then(function (r) { return r.json().then(function (b) { return { ok: r.ok, body: b }; }); })
+        .then(function (r) { return readJson(r).then(function (b) { return { ok: r.ok, body: b }; }); })
         .then(function (res) {
           if (!res.ok || !res.body.ok) throw new Error(res.body.error || "Your order couldn't be placed.");
           formEl.hidden = true;
