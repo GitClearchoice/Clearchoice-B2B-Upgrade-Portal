@@ -63,7 +63,7 @@ Upload this file to the new Claude project, then start a chat with:
 **Phase 3 next:**
 1. Check: Place order from the cart → draft order in Shopify (tags, PO, prices) and a Parked sales order in the Unleashed sandbox (customer, delivery name/address, Customer Reference, prices, GST, instructions). Then delete the test orders.
 2. Check the cart page and cart drawer for trade buyers (theme cart prices are hidden; the Trade order block shows trade prices).
-3. Then phase 4: budgets/approvals and the email service.
+3. Then phase 4: budgets/approvals and the email service. **Budget tracker goes in the Trade order block on the cart page** (asked 27 Nov), under the delivery site: this month's budget for the site, spent so far, this order, remaining after it; if the order would go over, say it will be sent to the head-office admin for approval (button text changes accordingly). Updates when the site is switched.
 
 ---
 
