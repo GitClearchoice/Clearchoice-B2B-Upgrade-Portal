@@ -68,7 +68,7 @@ function describe(status: string) {
 
 const money = (n: number) => "$" + n.toLocaleString("en-AU", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
 const RED = "#e40046";
-const box: React.CSSProperties = { maxWidth: 720, margin: "24px auto", padding: 24, background: "#fff", borderRadius: 8, fontFamily: "Arial, Helvetica, sans-serif", color: "#222", boxShadow: "0 2px 12px rgba(0,0,0,.08)" };
+const box: React.CSSProperties = { maxWidth: 720, margin: "12px auto", padding: "20px 16px", background: "#fff", borderRadius: 8, fontFamily: "Arial, Helvetica, sans-serif", color: "#222", boxShadow: "0 2px 12px rgba(0,0,0,.08)" };
 const cell: React.CSSProperties = { padding: "6px 8px", borderBottom: "1px solid #eee" };
 const num: React.CSSProperties = { ...cell, textAlign: "right", whiteSpace: "nowrap" };
 const btn = (bg: string): React.CSSProperties => ({ background: bg, color: "#fff", border: 0, borderRadius: 6, padding: "12px 24px", fontSize: 16, fontWeight: 700, cursor: "pointer" });
@@ -94,7 +94,7 @@ export default function Approval() {
             {[["Company", o.companyName], ["Site", o.siteName], ["Ordered by", o.buyerName], ["Placed", o.placed], ["PO number", o.poNumber], ["Reference", o.reference], ["Delivery note", o.note]]
               .filter(([, v]) => v)
               .map(([k, v]) => (
-                <tr key={k}><td style={{ color: "#777", paddingRight: 16 }}>{k}</td><td>{v}</td></tr>
+                <tr key={k}><td style={{ color: "#777", paddingRight: 16, whiteSpace: "nowrap", verticalAlign: "top" }}>{k}</td><td>{v}</td></tr>
               ))}
           </tbody>
         </table>
@@ -108,13 +108,17 @@ export default function Approval() {
           </div>
         )}
 
+        {/* Two columns so it fits a phone: product with "qty × unit price" underneath, and the line total. */}
         <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 14, margin: "12px 0" }}>
-          <thead><tr><th style={{ ...cell, textAlign: "left" }}>Product</th><th style={num}>Qty</th><th style={num}>Unit ex GST</th><th style={num}>Total ex GST</th></tr></thead>
+          <thead><tr><th style={{ ...cell, textAlign: "left" }}>Product</th><th style={num}>Total ex GST</th></tr></thead>
           <tbody>
             {o.lines.map((l, i) => (
-              <tr key={i}><td style={cell}>{l.title || l.sku}<br /><small style={{ color: "#777" }}>{l.sku}</small></td><td style={num}>{l.quantity}</td><td style={num}>{money(l.unitExGst)}</td><td style={num}>{money(l.lineExGst)}</td></tr>
+              <tr key={i}>
+                <td style={cell}><b>{l.title || l.sku}</b><br /><small style={{ color: "#777" }}>{l.sku}</small><br /><span style={{ fontSize: 13 }}>{l.quantity} × {money(l.unitExGst)} ex GST</span></td>
+                <td style={{ ...num, verticalAlign: "top" }}>{money(l.lineExGst)}</td>
+              </tr>
             ))}
-            <tr><td colSpan={3} style={{ ...num, fontWeight: 700 }}>Goods total ex GST</td><td style={{ ...num, fontWeight: 700 }}>{money(o.goodsExGst)}</td></tr>
+            <tr><td style={{ ...num, fontWeight: 700 }}>Goods total ex GST</td><td style={{ ...num, fontWeight: 700 }}>{money(o.goodsExGst)}</td></tr>
           </tbody>
         </table>
 
@@ -128,7 +132,7 @@ export default function Approval() {
               Note to the buyer (optional, shown if you decline)
               <textarea name="reason" rows={3} maxLength={500} style={{ display: "block", width: "100%", marginTop: 6, padding: 8, font: "inherit", boxSizing: "border-box" }} />
             </label>
-            <div style={{ display: "flex", gap: 12, marginTop: 12 }}>
+            <div style={{ display: "flex", flexWrap: "wrap", gap: 12, marginTop: 12 }}>
               <button type="submit" name="decision" value="approve" disabled={busy} style={btn(RED)}>Approve order</button>
               <button type="submit" name="decision" value="reject" disabled={busy} style={btn("#555")}>Decline</button>
             </div>

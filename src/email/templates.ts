@@ -25,32 +25,33 @@ const esc = (s: unknown) =>
   String(s ?? "").replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" })[c]!);
 
 function layout(title: string, body: string): string {
-  return `<!doctype html><html><body style="margin:0;padding:24px;background:#f5f5f5;font-family:Arial,Helvetica,sans-serif;color:#222">
-<div style="max-width:640px;margin:0 auto;background:#fff;border-radius:8px;padding:24px">
+  return `<!doctype html><html><head><meta name="viewport" content="width=device-width, initial-scale=1"><meta charset="utf-8"></head><body style="margin:0;padding:12px;background:#f5f5f5;font-family:Arial,Helvetica,sans-serif;color:#222">
+<div style="max-width:640px;margin:0 auto;background:#fff;border-radius:8px;padding:20px 16px">
 <h1 style="font-size:20px;margin:0 0 16px;color:${BRAND}">${esc(title)}</h1>
 ${body}
 <p style="font-size:12px;color:#777;margin-top:24px">Clearchoice Products · Trade portal</p>
 </div></body></html>`;
 }
 
+// Two columns (product with "qty × unit price" underneath, and the line total), so it fits a phone
+// screen in every mail app without media queries.
 function linesHtml(o: OrderSummary): string {
+  const cell = "padding:8px 6px;border-bottom:1px solid #eee;vertical-align:top";
   const rows = o.lines
     .map(
-      (l) => `<tr><td style="padding:6px 8px;border-bottom:1px solid #eee">${esc(l.title || l.sku)}<br><span style="color:#777;font-size:12px">${esc(l.sku)}</span></td>
-<td style="padding:6px 8px;border-bottom:1px solid #eee;text-align:right">${l.quantity}</td>
-<td style="padding:6px 8px;border-bottom:1px solid #eee;text-align:right">${money(l.unitExGst)}</td>
-<td style="padding:6px 8px;border-bottom:1px solid #eee;text-align:right">${money(l.lineExGst)}</td></tr>`,
+      (l) => `<tr><td style="${cell}"><b>${esc(l.title || l.sku)}</b><br><span style="color:#777;font-size:12px">${esc(l.sku)}</span><br><span style="font-size:13px">${l.quantity} × ${money(l.unitExGst)} ex GST</span></td>
+<td style="${cell};text-align:right;white-space:nowrap">${money(l.lineExGst)}</td></tr>`,
     )
     .join("");
-  return `<table style="width:100%;border-collapse:collapse;font-size:14px;margin:12px 0">
-<tr><th style="text-align:left;padding:6px 8px;border-bottom:2px solid #ddd">Product</th><th style="text-align:right;padding:6px 8px;border-bottom:2px solid #ddd">Qty</th><th style="text-align:right;padding:6px 8px;border-bottom:2px solid #ddd">Unit ex GST</th><th style="text-align:right;padding:6px 8px;border-bottom:2px solid #ddd">Total ex GST</th></tr>
+  return `<table role="presentation" style="width:100%;border-collapse:collapse;font-size:14px;margin:12px 0">
+<tr><th style="text-align:left;padding:6px;border-bottom:2px solid #ddd">Product</th><th style="text-align:right;padding:6px;border-bottom:2px solid #ddd;white-space:nowrap">Total ex GST</th></tr>
 ${rows}
-<tr><td colspan="3" style="padding:6px 8px;text-align:right;font-weight:bold">Goods total ex GST</td><td style="padding:6px 8px;text-align:right;font-weight:bold">${money(o.goodsExGst)}</td></tr>
+<tr><td style="padding:8px 6px;text-align:right;font-weight:bold">Goods total ex GST</td><td style="padding:8px 6px;text-align:right;font-weight:bold;white-space:nowrap">${money(o.goodsExGst)}</td></tr>
 </table>`;
 }
 
 function detailsHtml(o: OrderSummary): string {
-  const row = (k: string, v: unknown) => (v ? `<tr><td style="padding:2px 12px 2px 0;color:#777">${k}</td><td style="padding:2px 0">${esc(v)}</td></tr>` : "");
+  const row = (k: string, v: unknown) => (v ? `<tr><td style="padding:3px 12px 3px 0;color:#777;white-space:nowrap;vertical-align:top">${k}</td><td style="padding:3px 0">${esc(v)}</td></tr>` : "");
   return `<table style="font-size:14px;margin:8px 0">${row("Company", o.companyName)}${row("Site", o.siteName)}${row("PO number", o.poNumber)}${row("Ordered by", o.buyerName)}${row("Reference", o.reference)}${row("Unleashed order", o.unleashedOrderNumber)}${row("Delivery note", o.note)}</table>`;
 }
 
@@ -115,7 +116,7 @@ export function approvalRequestEmail(o: OrderSummary, b: BudgetLine, approverNam
   const button = `<p style="margin:20px 0"><a href="${esc(links.review)}" style="display:inline-block;background:${BRAND};color:#fff;font-weight:bold;font-size:16px;text-decoration:none;padding:12px 24px;border-radius:6px">Review order</a></p>`;
   return {
     subject,
-    html: layout("Order needs your approval", `<p>${esc(intro)}</p>${budgetHtml(b, o.goodsExGst)}${button}${detailsHtml(o)}${linesHtml(o)}<p style="font-size:12px;color:#777">If the button doesn't work, copy this link into your browser:<br>${esc(links.review)}</p>`),
+    html: layout("Order needs your approval", `<p>${esc(intro)}</p>${budgetHtml(b, o.goodsExGst)}${button}${detailsHtml(o)}${linesHtml(o)}<p style="font-size:12px;color:#777">If the button doesn't work, copy this link into your browser:<br><span style="word-break:break-all">${esc(links.review)}</span></p>`),
     text: `${intro}\n\n${budgetText(b, o.goodsExGst)}\n\nReview and approve or decline: ${links.review}\n\n${detailsText(o)}\n\n${linesText(o)}`,
   };
 }

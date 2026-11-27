@@ -290,13 +290,13 @@
           "<br><small>" + esc(i.sku || "") + "</small>" +
           (!breaksShownInTheme && p ? breaksHtml(p.breaks, i.quantity) : "") +
           (err ? "<div class='cc-trade-order__line-error'>" + esc(err) + "</div>" : "") +
-          "</td><td class='num'>" + i.quantity + "</td><td class='num'>" + (p ? money(p.unitExGst) : "–") +
-          "</td><td class='num'>" + (p ? money(lineEx) : "–") + "</td></tr>";
+          "</td><td class='num' data-label='Qty'>" + i.quantity + "</td><td class='num' data-label='Each'>" + (p ? money(p.unitExGst) : "–") +
+          "</td><td class='num' data-label='Total'>" + (p ? money(lineEx) : "–") + "</td></tr>";
       }).join("");
       sub = Math.round(sub * 100) / 100;
       gst = Math.round(gst * 100) / 100;
       linesEl.innerHTML =
-        "<table><thead><tr><th>Product</th><th class='num'>Qty</th><th class='num'>Unit ex GST</th><th class='num'>Total ex GST</th></tr></thead>" +
+        "<table class='cc-lines-table'><thead><tr><th>Product</th><th class='num'>Qty</th><th class='num'>Unit ex GST</th><th class='num'>Total ex GST</th></tr></thead>" +
         "<tbody>" + rows + "</tbody><tfoot>" +
         "<tr><td colspan='3' class='num'>Subtotal ex GST</td><td class='num'>" + money(sub) + "</td></tr>" +
         "<tr><td colspan='3' class='num'>GST</td><td class='num'>" + money(gst) + "</td></tr>" +

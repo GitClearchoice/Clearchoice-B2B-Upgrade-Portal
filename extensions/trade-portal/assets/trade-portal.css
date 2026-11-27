@@ -34,7 +34,6 @@ a.cc-site-picker__item:hover, a.cc-site-picker__item:focus { background: rgba(0,
 .cc-trade-order .cc-trade-order__submit:focus-visible { outline: 3px solid rgba(228,0,70,.35); outline-offset: 2px; }
 .cc-trade-order .cc-trade-order__submit:disabled { opacity: .5; cursor: not-allowed; }
 .cc-trade-order__label-one-line { white-space: nowrap; }
-@media (max-width: 480px) { .cc-trade-order__label-one-line { white-space: normal; } }
 .cc-qty-breaks { list-style: none; margin: .35rem 0 0; padding: 0; font-size: 16px; line-height: 1.4; }
 .cc-qty-breaks li { opacity: .75; }
 .cc-qty-breaks li span { font-weight: 600; }
@@ -50,3 +49,21 @@ a.cc-site-picker__item:hover, a.cc-site-picker__item:focus { background: rgba(0,
 .cc-budget__rows dd { margin: 0; text-align: right; white-space: nowrap; }
 .cc-budget__warn { color: #b00020; font-weight: 600; margin: .6rem 0 0; }
 .cc-budget__note { font-size: .85em; opacity: .7; margin: .4rem 0 0; }
+/* Phones: cart lines as stacked rows (name on top, then qty / unit / total), totals as label–value rows. */
+@media (max-width: 600px) {
+  .cc-lines-table, .cc-lines-table tbody, .cc-lines-table tfoot { display: block; width: 100%; }
+  .cc-lines-table thead { display: none; }
+  .cc-lines-table tbody tr { display: grid; grid-template-columns: auto 1fr auto; gap: .2rem .75rem; padding: .6rem 0; border-bottom: 1px solid rgba(0,0,0,.08); }
+  .cc-lines-table tbody td { padding: 0; border: 0; }
+  .cc-lines-table tbody td:first-child { grid-column: 1 / -1; font-weight: 600; overflow-wrap: anywhere; }
+  .cc-lines-table tbody td.num { text-align: left; white-space: normal; }
+  .cc-lines-table tbody td.num:last-child { text-align: right; font-weight: 600; }
+  .cc-lines-table tbody td.num::before { content: attr(data-label) " "; font-weight: 400; opacity: .65; font-size: .85em; }
+  .cc-lines-table tfoot tr { display: flex; justify-content: space-between; }
+  .cc-lines-table tfoot td { padding: .35rem 0; }
+  .cc-lines-table tfoot td:empty { display: none; }
+  .cc-trade-order__label-one-line { white-space: normal; }
+  .cc-trade-order .cc-trade-order__submit { width: 100%; }
+  .cc-site-picker__current { align-items: flex-start; }
+  .cc-budget__rows { font-size: .95em; }
+}
