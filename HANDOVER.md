@@ -56,12 +56,14 @@ Upload this file to the new Claude project, then start a chat with:
 - Theme app extension `extensions/trade-portal`: **Trade price** block (product page: price for the selected variant and quantity, ex and inc GST), **Trade order** block (cart page: lines with trade prices, subtotal/GST/total, PO number, delivery note, Place order; re-prices if the cart changed, clears the cart after), **Trade portal** app embed (hides checkout and express-checkout buttons for trade buyers). Uses the buyer's current site from Shopify's own B2B location selector (`customer.current_location`). Retail customers see nothing.
 - No budget check yet: every order is sent (budgets/approvals are phase 4).
 
+**Phase 3, storefront set-up — done (27 Nov).** Live theme copied to the dev store (its `templates/product.json` was skipped on upload because of a Search & Discovery dynamic source, `shopify--discovery--product_search_boost`; recreated with that setting emptied). Trade portal embed on, Trade price block on Default product, Trade order block on Cart. Test buyer contact on Assetlink. Product page trade price confirmed working.
+- Lessons: the app proxy only works once the app has been opened in the store admin (that stores the offline session on Render); until then the storefront gets "There was an error in the third-party application".
+- Changed after testing: no site name on the product price; the **Trade portal** embed hides the theme's retail prices for trade buyers (setting "Theme price elements to hide", default `.price, product-price, .product__price, .product-price, [data-product-price]`) and puts the trade price (qty 1, ex GST, "From" for mixed variants) on product cards: recently viewed, collections, search, recommendations (cards found by their `/products/` link; prices via `/products/<handle>.js` + `/apps/b2b/prices`).
+
 **Phase 3 next:**
-1. You: copy the live theme and a few hundred products into the dev store (SKUs = Unleashed codes), if not done yet.
-2. You: `npm run deploy` in your own terminal (releases the theme extension). In the dev store theme editor: App embeds → turn on **Trade portal**; product template → add block **Trade price**; cart template → add block **Trade order**.
-3. Test buyer: in Shopify admin, add a contact with your own email to Assetlink (Ordering only, on 2–3 sites); log in on the storefront as that contact. Don't use a real customer's email.
-4. Check: product page price matches the app's price check; cart shows trade prices; Place order → draft order in Shopify (tags, PO, prices) and a Parked sales order in the Unleashed sandbox (customer, delivery name/address, Customer Reference, prices, GST, instructions). Then delete the test orders.
-5. Collection pages: product cards are theme code, so trade prices there need a small theme edit (to do once the live theme is in the dev store). The theme's own prices also need hiding for trade buyers.
+1. Check: Place order from the cart → draft order in Shopify (tags, PO, prices) and a Parked sales order in the Unleashed sandbox (customer, delivery name/address, Customer Reference, prices, GST, instructions). Then delete the test orders.
+2. Check the cart page and cart drawer for trade buyers (theme cart prices are hidden; the Trade order block shows trade prices).
+3. Then phase 4: budgets/approvals and the email service.
 
 ---
 
