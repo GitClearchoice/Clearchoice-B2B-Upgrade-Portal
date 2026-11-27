@@ -60,9 +60,16 @@ Upload this file to the new Claude project, then start a chat with:
 - Lessons: the app proxy only works once the app has been opened in the store admin (that stores the offline session on Render); until then the storefront gets "There was an error in the third-party application".
 - Changed after testing: no site name on the product price; the **Trade portal** embed hides the theme's retail prices for trade buyers (setting "Theme price elements to hide", default `.price, product-price, .product__price, .product-price, [data-product-price]`) and puts the trade price (qty 1, ex GST, "From" for mixed variants) on product cards: recently viewed, collections, search, recommendations (cards found by their `/products/` link; prices via `/products/<handle>.js` + `/apps/b2b/prices`).
 
+**Phase 3, Place order — tested (27 Nov).** Test order reached the Unleashed sandbox under Assetlink with the right prices (incl. Sell Price Tier 10 lines that are 10% above the store's normal price). Changes from testing:
+- Theme cart prices/totals hidden for trade buyers (embed setting "Theme cart price elements to hide"; this theme uses `.price__current`). The theme's cart footer (order note, subtotal) to be hidden the same way once its class is known.
+- Trade order block: works inside the theme's cart `<form>` (no nested form); searchable site picker (Shopify `url_to_set_as_current`); delivery note label "Phone Number / Delivery hours"; Place order button Pantone 192 C (#E40046), bold, larger; re-prices when the theme changes the cart (fetch/XHR watch + re-check after clicks and every 4 s; `/cart.js` only, no API cost).
+- Quantity breaks: `/apps/b2b/prices?breaks=1` returns each buyer's real breaks (`src/pricing/breaks.ts`); shown under the theme cart's quantity boxes and the product trade price, 16px, active break in red.
+- Dev store: stock comes from the Unleashed Shopify app's stock sync; some products still show 0 (Unleashed integration linking/warehouse), so the theme's backorder message shows. Live store sells when out of stock (inventory policy continue + theme's Back order button), so the app needs no stock logic.
+- Pricing changes in Unleashed show after the nightly full sync (or Render → clearchoice-b2b-sync → Trigger Run). A daytime changes-sync cron was offered and declined (27 Nov).
+
 **Phase 3 next:**
-1. Check: Place order from the cart → draft order in Shopify (tags, PO, prices) and a Parked sales order in the Unleashed sandbox (customer, delivery name/address, Customer Reference, prices, GST, instructions). Then delete the test orders.
-2. Check the cart page and cart drawer for trade buyers (theme cart prices are hidden; the Trade order block shows trade prices).
+1. Delete the test draft order and sandbox sales order. Hide the theme's cart footer for trade buyers (needs its class).
+2. Pick the email service (Postmark or Resend) for phase 4.
 3. Then phase 4: budgets/approvals and the email service. **Budget tracker goes in the Trade order block on the cart page** (asked 27 Nov), under the delivery site: this month's budget for the site, spent so far, this order, remaining after it; if the order would go over, say it will be sent to the head-office admin for approval (button text changes accordingly). Updates when the site is switched.
 
 ---
