@@ -61,6 +61,8 @@
         {%- if customer.current_company %} ({{ customer.current_company.name }}){% endif -%}
       </p>
     {%- endif -%}
+    {%- comment -%} Site budget for this month (filled in by trade-portal.js; hidden when the site has no budget). {%- endcomment -%}
+    <div class="cc-budget" data-cc-budget hidden></div>
     <div data-cc-lines><p>Loading your prices…</p></div>
     {%- comment -%}
       Not a <form>: themes often wrap the cart page in their own cart <form>, and a nested form

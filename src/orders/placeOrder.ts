@@ -1,6 +1,6 @@
 // "Place order" for trade buyers (HANDOVER "Order flow"):
-//   price on the server → Shopify draft order (never completed) → Unleashed sales order via the API.
-// Phase 3 sends every order (no budget check yet; budgets and approvals are phase 4).
+//   price on the server → budget check → Shopify draft order (never completed) →
+//   within budget: Unleashed sales order via the API; over budget: wait for the head-office admin.
 // Everything outside (Shopify, Unleashed, the DB) is passed in, so this is testable without them.
 import { randomUUID } from "node:crypto";
 import type { BuyerContext } from "../b2b/buyer.ts";
@@ -10,8 +10,23 @@ import type { PriceStore } from "../sync/store.ts";
 import { UnleashedError } from "../unleashed/client.ts";
 import { buildSalesOrder, deliveryInstructionFor } from "../unleashed/salesOrder.ts";
 import type { UTax, UWarehouse } from "../unleashed/types.ts";
+import { budgetStatus, needsApproval, type BudgetRepo, type BudgetStatus } from "./budget.ts";
+import type { EmailSender } from "../email/postmark.ts";
+import {
+  approvalRequestEmail,
+  awaitingApprovalEmail,
+  orderReceivedEmail,
+  unleashedFailedEmail,
+  type Email,
+  type OrderSummary,
+} from "../email/templates.ts";
+import { approvalToken } from "./approvalToken.ts";
 
-export type TradeOrderStatus = "pending" | "sent" | "failed";
+/**
+ * pending: on its way to Unleashed (also after approval) · sent · failed: retrying ·
+ * awaiting-approval: over budget, waiting for the head-office admin · rejected: declined by them.
+ */
+export type TradeOrderStatus = "pending" | "sent" | "failed" | "awaiting-approval" | "rejected";
 
 export interface TradeOrderLine {
   variantId: string;
@@ -19,6 +34,8 @@ export interface TradeOrderLine {
   quantity: number;
   unitExGst: number;
   lineExGst: number;
+  /** Product description from Unleashed, for emails and reports. */
+  title?: string;
 }
 
 export interface TradeOrderRecord {
@@ -31,6 +48,7 @@ export interface TradeOrderRecord {
   buyerName: string;
   buyerEmail: string | null;
   companyId: string;
+  companyName: string;
   locationId: string;
   siteName: string;
   customerCode: string;
@@ -45,10 +63,20 @@ export interface TradeOrderRecord {
   payload: unknown;
   attempts: number;
   lastError: string | null;
+  /** Site budget for the order's month when it was placed (null = no budget). */
+  budgetExGst: number | null;
+  /** Goods already ordered for the site that month, before this order. */
+  committedBeforeExGst: number | null;
+  approverName: string | null;
+  approverEmail: string | null;
+  decidedAt: Date | null;
+  /** Reason given when declined (or a note when approved). */
+  decisionNote: string | null;
   createdAt: Date;
 }
 
 export interface OrderRepo {
+  get(id: string): Promise<TradeOrderRecord | null>;
   findByRequestKey(shop: string, requestKey: string): Promise<TradeOrderRecord | null>;
   /** Must reject a second record with the same (shop, requestKey). */
   create(rec: TradeOrderRecord): Promise<void>;
@@ -73,12 +101,25 @@ export interface OrderSettings {
   taxCode: string; // "OUTPUT" = "GST on Income (10%)"
 }
 
+export interface NotifySettings {
+  /** Base URL of the app (SHOPIFY_APP_URL), for the approval link. */
+  appUrl: string;
+  /** Signs approval links (SHOPIFY_API_SECRET). */
+  tokenSecret: string;
+  /** Clearchoice staff address for failed orders, and approvals when a company has no admin. */
+  staffEmail?: string | null;
+}
+
 export interface OrderDeps {
   shopify: ShopifyGraphql;
   unleashed: UnleashedOrders;
   store: PriceStore;
   orders: OrderRepo;
   settings: OrderSettings;
+  /** Site budgets; without it every order is sent (no budget check). */
+  budgets?: BudgetRepo;
+  email?: EmailSender;
+  notify?: NotifySettings;
   log?: (msg: string) => void;
   now?: () => Date;
 }
@@ -95,6 +136,8 @@ export interface PlaceOrderInput {
 export interface PlaceOrderResult {
   orderId: string;
   status: TradeOrderStatus;
+  /** Set when the order went to the head-office admin for approval. */
+  approverName?: string | null;
   draftOrderName: string | null;
   unleashedOrderNumber: string | null;
   goodsExGst: number;
@@ -131,6 +174,56 @@ const TAGS_ADD = `#graphql
   mutation TagDraft($id: ID!, $tags: [String!]!) {
     tagsAdd(id: $id, tags: $tags) { userErrors { field message } }
   }`;
+
+const TAGS_REMOVE = `#graphql
+  mutation UntagDraft($id: ID!, $tags: [String!]!) {
+    tagsRemove(id: $id, tags: $tags) { userErrors { field message } }
+  }`;
+
+// Head-office admin: company metafield b2b.budget_admin_contact (a CompanyContact GID), else the main contact.
+const APPROVER = `#graphql
+  query BudgetApprover($company: ID!) {
+    company(id: $company) {
+      admin: metafield(namespace: "b2b", key: "budget_admin_contact") { value }
+      mainContact { customer { displayName defaultEmailAddress { emailAddress } } }
+    }
+  }`;
+
+const CONTACT = `#graphql
+  query BudgetApproverContact($id: ID!) {
+    node(id: $id) {
+      ... on CompanyContact { customer { displayName defaultEmailAddress { emailAddress } } }
+    }
+  }`;
+
+type ContactCustomer = { displayName: string; defaultEmailAddress: { emailAddress: string } | null } | null;
+
+export interface Approver {
+  name: string;
+  email: string;
+  /** True when no head-office admin was found and the request goes to Clearchoice staff. */
+  isStaff?: boolean;
+}
+
+export async function findApprover(deps: OrderDeps, companyId: string): Promise<Approver | null> {
+  const asApprover = (c: ContactCustomer): Approver | null =>
+    c?.defaultEmailAddress?.emailAddress ? { name: c.displayName, email: c.defaultEmailAddress.emailAddress } : null;
+  try {
+    const r = await deps.shopify<{ company: { admin: { value: string } | null; mainContact: { customer: ContactCustomer } | null } | null }>(APPROVER, { company: companyId });
+    const adminId = r.company?.admin?.value?.trim();
+    if (adminId?.startsWith("gid://shopify/CompanyContact/")) {
+      const c = await deps.shopify<{ node: { customer: ContactCustomer } | null }>(CONTACT, { id: adminId });
+      const a = asApprover(c.node?.customer ?? null);
+      if (a) return a;
+    }
+    const main = asApprover(r.company?.mainContact?.customer ?? null);
+    if (main) return main;
+  } catch (e) {
+    (deps.log ?? (() => {}))(`Couldn't look up the budget admin for ${companyId}: ${(e as Error).message}`);
+  }
+  const staff = deps.notify?.staffEmail;
+  return staff ? { name: "Clearchoice", email: staff, isStaff: true } : null;
+}
 
 interface SiteData {
   companyLocation: {
@@ -195,9 +288,27 @@ export async function placeTradeOrder(deps: OrderDeps, input: PlaceOrderInput): 
     lineExGst: p.lineExGst,
   }));
   const taxable = new Map<string, boolean>();
-  for (const l of lines) taxable.set(l.sku, (await deps.store.getProduct(l.sku))?.taxable !== false);
+  for (const l of lines) {
+    const product = await deps.store.getProduct(l.sku);
+    taxable.set(l.sku, product?.taxable !== false);
+    if (product?.description) l.title = product.description;
+  }
 
   const { warehouse, tax } = await resolveUnleashedSettings(deps);
+
+  // Budget check (before this order is saved, so it isn't counted twice). Orders by the head-office
+  // admin themselves don't wait for their own approval.
+  const createdAt = deps.now?.() ?? new Date();
+  let budget: BudgetStatus | null = null;
+  let approver: Approver | null = null;
+  if (deps.budgets) {
+    budget = await budgetStatus(deps.budgets, input.shop, loc.id, createdAt);
+    if (needsApproval(budget, priced.goodsExGst)) {
+      approver = await findApprover(deps, input.buyer.companyId);
+      if (!approver) throw new OrderError("This order is over the site's monthly budget and needs approval, but no approver is set up. Please contact Clearchoice.");
+      if (input.buyer.email && approver.email.toLowerCase() === input.buyer.email.toLowerCase()) approver = null;
+    }
+  }
 
   // Save the Guid before anything is sent: a retry can then never create a second Unleashed order.
   const rec: TradeOrderRecord = {
@@ -208,6 +319,7 @@ export async function placeTradeOrder(deps: OrderDeps, input: PlaceOrderInput): 
     buyerName: input.buyer.name,
     buyerEmail: input.buyer.email,
     companyId: input.buyer.companyId,
+    companyName: input.buyer.companyName,
     locationId: loc.id,
     siteName: loc.name,
     customerCode,
@@ -222,7 +334,13 @@ export async function placeTradeOrder(deps: OrderDeps, input: PlaceOrderInput): 
     payload: null,
     attempts: 0,
     lastError: null,
-    createdAt: deps.now?.() ?? new Date(),
+    budgetExGst: budget?.budget ?? null,
+    committedBeforeExGst: budget ? budget.committed : null,
+    approverName: approver?.name ?? null,
+    approverEmail: approver?.email ?? null,
+    decidedAt: null,
+    decisionNote: null,
+    createdAt,
   };
   try {
     await deps.orders.create(rec);
@@ -250,7 +368,7 @@ export async function placeTradeOrder(deps: OrderDeps, input: PlaceOrderInput): 
           })),
           poNumber,
           note: note ?? undefined,
-          tags: ["trade-order"],
+          tags: approver ? ["trade-order", "awaiting-approval"] : ["trade-order"],
           customAttributes: [{ key: "Unleashed order guid", value: rec.id }],
         },
       },
@@ -281,10 +399,56 @@ export async function placeTradeOrder(deps: OrderDeps, input: PlaceOrderInput): 
     deliveryInstruction: siteNote,
     orderDate: rec.createdAt,
   });
-  await deps.orders.update(rec.id, { draftOrderId: draft.id, draftOrderName: draft.name, payload });
+  const saved: TradeOrderRecord = { ...rec, draftOrderId: draft.id, draftOrderName: draft.name, payload };
 
-  const sent = await sendToUnleashed(deps, { ...rec, draftOrderId: draft.id, draftOrderName: draft.name, payload });
+  if (approver && budget?.budget != null) {
+    // Over budget: prices are locked in the saved payload; nothing goes to Unleashed until approved.
+    await deps.orders.update(rec.id, { draftOrderId: draft.id, draftOrderName: draft.name, payload, status: "awaiting-approval" });
+    const waiting = { ...saved, status: "awaiting-approval" as const };
+    const summary = summaryOf(waiting);
+    await sendEmail(deps, approver.email, approvalRequestEmail(summary, { month: budget.month, budget: budget.budget, committed: budget.committed }, approver.name, {
+      review: approvalUrl(deps, rec.id),
+    }), "approval-request", input.buyer.email ?? undefined);
+    if (input.buyer.email) await sendEmail(deps, input.buyer.email, awaitingApprovalEmail(summary, approver.name), "awaiting-approval");
+    log(`${draft.name} for ${customerCode} is over budget: sent to ${approver.email} for approval`);
+    return { ...resultOf(waiting), approverName: approver.name };
+  }
+
+  await deps.orders.update(rec.id, { draftOrderId: draft.id, draftOrderName: draft.name, payload });
+  const sent = await sendToUnleashed(deps, saved);
+  // "sent" or "failed" (retrying): either way the order is received.
+  if (input.buyer.email) await sendEmail(deps, input.buyer.email, orderReceivedEmail(summaryOf(sent)), "order-received");
   return resultOf(sent);
+}
+
+export function summaryOf(r: TradeOrderRecord): OrderSummary {
+  return {
+    reference: r.draftOrderName,
+    unleashedOrderNumber: r.unleashedOrderNumber,
+    companyName: r.companyName,
+    siteName: r.siteName,
+    poNumber: r.poNumber,
+    buyerName: r.buyerName,
+    note: r.note,
+    goodsExGst: r.goodsExGst,
+    lines: r.lines,
+  };
+}
+
+export function approvalUrl(deps: OrderDeps, orderId: string): string {
+  const n = deps.notify;
+  if (!n) return "";
+  return `${n.appUrl.replace(/\/$/, "")}/approvals/${orderId}?t=${approvalToken(orderId, n.tokenSecret)}`;
+}
+
+/** Emails never stop an order: failures are logged. */
+export async function sendEmail(deps: OrderDeps, to: string, e: Email, tag: string, replyTo?: string) {
+  if (!deps.email) return;
+  try {
+    await deps.email.send({ to, subject: e.subject, html: e.html, text: e.text, tag, replyTo });
+  } catch (err) {
+    (deps.log ?? (() => {}))(`Email "${e.subject}" to ${to} failed: ${(err as Error).message}`);
+  }
 }
 
 /**
@@ -312,6 +476,11 @@ export async function sendToUnleashed(deps: OrderDeps, rec: TradeOrderRecord, op
     await deps.orders.update(rec.id, patch);
     if (rec.status !== "failed") await tagDraft(deps, rec.draftOrderId, ["unleashed-failed"]);
     log(`Unleashed rejected ${rec.draftOrderName} (attempt ${attempts}): ${msg}`);
+    // Staff hear about the first failure and when retries run out.
+    const final = attempts >= MAX_ATTEMPTS;
+    if ((attempts === 1 || final) && deps.notify?.staffEmail) {
+      await sendEmail(deps, deps.notify.staffEmail, unleashedFailedEmail(summaryOf({ ...rec, ...patch }), attempts, msg, final), "unleashed-failed");
+    }
     return { ...rec, ...patch };
   }
 }
@@ -342,10 +511,11 @@ async function findUnleashedOrder(deps: OrderDeps, guid: string): Promise<string
   }
 }
 
-async function tagDraft(deps: OrderDeps, draftId: string | null, tags: string[]) {
+export async function tagDraft(deps: OrderDeps, draftId: string | null, tags: string[], remove: string[] = []) {
   if (!draftId) return;
   try {
-    await deps.shopify(TAGS_ADD, { id: draftId, tags });
+    if (remove.length) await deps.shopify(TAGS_REMOVE, { id: draftId, tags: remove });
+    if (tags.length) await deps.shopify(TAGS_ADD, { id: draftId, tags });
   } catch (e) {
     (deps.log ?? (() => {}))(`Couldn't tag ${draftId}: ${(e as Error).message}`);
   }

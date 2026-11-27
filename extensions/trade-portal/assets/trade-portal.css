@@ -39,3 +39,14 @@ a.cc-site-picker__item:hover, a.cc-site-picker__item:focus { background: rgba(0,
 .cc-qty-breaks li { opacity: .75; }
 .cc-qty-breaks li span { font-weight: 600; }
 .cc-qty-breaks li.is-active { opacity: 1; color: #e40046; font-weight: 600; }
+.cc-budget { max-width: 32rem; margin: .5rem 0 1rem; padding: .75rem 1rem; border: 1px solid rgba(0,0,0,.15); border-radius: 6px; font-size: 16px; }
+.cc-budget__title { font-weight: 700; margin-bottom: .5rem; }
+.cc-budget__bar { height: 8px; background: rgba(0,0,0,.08); border-radius: 4px; overflow: hidden; margin-bottom: .6rem; }
+.cc-budget__bar span { display: block; height: 100%; background: #2e7d32; }
+.cc-budget.is-over { border-color: #e40046; background: #fff4f6; }
+.cc-budget.is-over .cc-budget__bar span { background: #e40046; }
+.cc-budget__rows { display: grid; grid-template-columns: 1fr auto; gap: .2rem 1rem; margin: 0; }
+.cc-budget__rows dt { margin: 0; }
+.cc-budget__rows dd { margin: 0; text-align: right; white-space: nowrap; }
+.cc-budget__warn { color: #b00020; font-weight: 600; margin: .6rem 0 0; }
+.cc-budget__note { font-size: .85em; opacity: .7; margin: .4rem 0 0; }

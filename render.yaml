@@ -45,6 +45,14 @@ services:
         sync: false
       - key: SCOPES
         value: read_products,write_draft_orders,write_companies,write_customers,read_payment_terms,write_app_proxy
+      # Phase 4 emails (Postmark). Without POSTMARK_SERVER_TOKEN emails are only written to the log.
+      - key: POSTMARK_SERVER_TOKEN
+        sync: false
+      - key: EMAIL_FROM
+        value: Clearchoice Products <service@clearchoiceproducts.com>
+      # Clearchoice staff: failed orders, and approvals for companies with no head-office admin.
+      - key: STAFF_EMAIL
+        sync: false
 
   # 2:00am Sydney in summer (AEDT), 1:00am in winter. Render cron times are UTC.
   - type: cron

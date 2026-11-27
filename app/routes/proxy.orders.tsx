@@ -41,8 +41,11 @@ export const action = async ({ request }: ActionFunctionArgs) => {
       lines: Array.isArray(body.lines) ? body.lines.map((l) => ({ variantId: String(l.variantId), quantity: Number(l.quantity) })) : [],
     });
     // "sent" or "failed" (queued for retry): either way the buyer's order is received.
+    // "awaiting-approval": over budget, emailed to the head-office admin.
     return json({
       ok: true,
+      status: result.status,
+      approverName: result.approverName ?? null,
       orderId: result.orderId,
       reference: result.draftOrderName,
       unleashedOrderNumber: result.unleashedOrderNumber,

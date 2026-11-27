@@ -1,0 +1,154 @@
+// Order emails. Plain, table-free HTML that reads well in Outlook and on phones, plus a text version.
+import { monthLabel } from "../orders/budget.ts";
+
+export interface OrderSummary {
+  reference: string | null; // Shopify draft name, e.g. "#D12"
+  unleashedOrderNumber?: string | null;
+  companyName: string;
+  siteName: string;
+  poNumber: string;
+  buyerName: string;
+  note?: string | null;
+  goodsExGst: number;
+  lines: { sku: string; title?: string; quantity: number; unitExGst: number; lineExGst: number }[];
+}
+
+export interface BudgetLine {
+  month: string; // YYYY-MM
+  budget: number;
+  committed: number;
+}
+
+const BRAND = "#e40046";
+const money = (n: number) => "$" + n.toLocaleString("en-AU", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+const esc = (s: unknown) =>
+  String(s ?? "").replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" })[c]!);
+
+function layout(title: string, body: string): string {
+  return `<!doctype html><html><body style="margin:0;padding:24px;background:#f5f5f5;font-family:Arial,Helvetica,sans-serif;color:#222">
+<div style="max-width:640px;margin:0 auto;background:#fff;border-radius:8px;padding:24px">
+<h1 style="font-size:20px;margin:0 0 16px;color:${BRAND}">${esc(title)}</h1>
+${body}
+<p style="font-size:12px;color:#777;margin-top:24px">Clearchoice Products · Trade portal</p>
+</div></body></html>`;
+}
+
+function linesHtml(o: OrderSummary): string {
+  const rows = o.lines
+    .map(
+      (l) => `<tr><td style="padding:6px 8px;border-bottom:1px solid #eee">${esc(l.title || l.sku)}<br><span style="color:#777;font-size:12px">${esc(l.sku)}</span></td>
+<td style="padding:6px 8px;border-bottom:1px solid #eee;text-align:right">${l.quantity}</td>
+<td style="padding:6px 8px;border-bottom:1px solid #eee;text-align:right">${money(l.unitExGst)}</td>
+<td style="padding:6px 8px;border-bottom:1px solid #eee;text-align:right">${money(l.lineExGst)}</td></tr>`,
+    )
+    .join("");
+  return `<table style="width:100%;border-collapse:collapse;font-size:14px;margin:12px 0">
+<tr><th style="text-align:left;padding:6px 8px;border-bottom:2px solid #ddd">Product</th><th style="text-align:right;padding:6px 8px;border-bottom:2px solid #ddd">Qty</th><th style="text-align:right;padding:6px 8px;border-bottom:2px solid #ddd">Unit ex GST</th><th style="text-align:right;padding:6px 8px;border-bottom:2px solid #ddd">Total ex GST</th></tr>
+${rows}
+<tr><td colspan="3" style="padding:6px 8px;text-align:right;font-weight:bold">Goods total ex GST</td><td style="padding:6px 8px;text-align:right;font-weight:bold">${money(o.goodsExGst)}</td></tr>
+</table>`;
+}
+
+function detailsHtml(o: OrderSummary): string {
+  const row = (k: string, v: unknown) => (v ? `<tr><td style="padding:2px 12px 2px 0;color:#777">${k}</td><td style="padding:2px 0">${esc(v)}</td></tr>` : "");
+  return `<table style="font-size:14px;margin:8px 0">${row("Company", o.companyName)}${row("Site", o.siteName)}${row("PO number", o.poNumber)}${row("Ordered by", o.buyerName)}${row("Reference", o.reference)}${row("Unleashed order", o.unleashedOrderNumber)}${row("Delivery note", o.note)}</table>`;
+}
+
+function linesText(o: OrderSummary): string {
+  return (
+    o.lines.map((l) => `  ${l.quantity} x ${l.title || l.sku} (${l.sku}) @ ${money(l.unitExGst)} = ${money(l.lineExGst)}`).join("\n") +
+    `\n  Goods total ex GST: ${money(o.goodsExGst)}`
+  );
+}
+
+function detailsText(o: OrderSummary): string {
+  return [
+    `Company: ${o.companyName}`,
+    `Site: ${o.siteName}`,
+    `PO number: ${o.poNumber}`,
+    `Ordered by: ${o.buyerName}`,
+    o.reference ? `Reference: ${o.reference}` : "",
+    o.unleashedOrderNumber ? `Unleashed order: ${o.unleashedOrderNumber}` : "",
+    o.note ? `Delivery note: ${o.note}` : "",
+  ].filter(Boolean).join("\n");
+}
+
+function budgetHtml(b: BudgetLine, orderExGst: number): string {
+  const after = b.committed + orderExGst;
+  return `<p style="font-size:14px;background:#fff4f6;border-left:4px solid ${BRAND};padding:10px 12px">
+${esc(monthLabel(b.month))} budget for this site: <b>${money(b.budget)}</b><br>
+Already ordered this month: ${money(b.committed)}<br>
+This order: ${money(orderExGst)}<br>
+<b>Over budget by ${money(after - b.budget)}</b></p>`;
+}
+
+function budgetText(b: BudgetLine, orderExGst: number): string {
+  const after = b.committed + orderExGst;
+  return `${monthLabel(b.month)} budget for this site: ${money(b.budget)}\nAlready ordered this month: ${money(b.committed)}\nThis order: ${money(orderExGst)}\nOver budget by ${money(after - b.budget)}`;
+}
+
+export interface Email { subject: string; html: string; text: string }
+
+export function orderReceivedEmail(o: OrderSummary): Email {
+  const subject = `Order received: PO ${o.poNumber} for ${o.siteName}`;
+  const intro = `Thanks ${o.buyerName}, we've received your order and it's on its way to our team.`;
+  return {
+    subject,
+    html: layout("Order received", `<p>${esc(intro)}</p>${detailsHtml(o)}${linesHtml(o)}<p style="font-size:13px;color:#555">Prices are ex GST. Your order is charged to your account and invoiced on your usual terms.</p>`),
+    text: `${intro}\n\n${detailsText(o)}\n\n${linesText(o)}\n\nPrices are ex GST. Your order is charged to your account and invoiced on your usual terms.`,
+  };
+}
+
+export function awaitingApprovalEmail(o: OrderSummary, approverName: string): Email {
+  const subject = `Waiting for approval: PO ${o.poNumber} for ${o.siteName}`;
+  const intro = `Your order would take ${o.siteName} over its monthly budget, so it has been sent to ${approverName} for approval. We'll email you as soon as it's approved or declined.`;
+  return {
+    subject,
+    html: layout("Order waiting for approval", `<p>${esc(intro)}</p>${detailsHtml(o)}${linesHtml(o)}`),
+    text: `${intro}\n\n${detailsText(o)}\n\n${linesText(o)}`,
+  };
+}
+
+export function approvalRequestEmail(o: OrderSummary, b: BudgetLine, approverName: string, links: { review: string }): Email {
+  const subject = `Approval needed: ${o.siteName} order over budget (PO ${o.poNumber})`;
+  const intro = `Hi ${approverName}, ${o.buyerName} has placed an order for ${o.siteName} that would take the site over its monthly budget. Please approve or decline it.`;
+  const button = `<p style="margin:20px 0"><a href="${esc(links.review)}" style="display:inline-block;background:${BRAND};color:#fff;font-weight:bold;font-size:16px;text-decoration:none;padding:12px 24px;border-radius:6px">Review order</a></p>`;
+  return {
+    subject,
+    html: layout("Order needs your approval", `<p>${esc(intro)}</p>${budgetHtml(b, o.goodsExGst)}${button}${detailsHtml(o)}${linesHtml(o)}<p style="font-size:12px;color:#777">If the button doesn't work, copy this link into your browser:<br>${esc(links.review)}</p>`),
+    text: `${intro}\n\n${budgetText(b, o.goodsExGst)}\n\nReview and approve or decline: ${links.review}\n\n${detailsText(o)}\n\n${linesText(o)}`,
+  };
+}
+
+export function approvedEmail(o: OrderSummary, approverName: string): Email {
+  const subject = `Approved: PO ${o.poNumber} for ${o.siteName}`;
+  const intro = `Good news: ${approverName} approved your order. It's on its way to our team.`;
+  return {
+    subject,
+    html: layout("Order approved", `<p>${esc(intro)}</p>${detailsHtml(o)}${linesHtml(o)}`),
+    text: `${intro}\n\n${detailsText(o)}\n\n${linesText(o)}`,
+  };
+}
+
+export function rejectedEmail(o: OrderSummary, approverName: string, reason: string | null): Email {
+  const subject = `Declined: PO ${o.poNumber} for ${o.siteName}`;
+  const intro = `${approverName} declined your order, so it hasn't been sent to Clearchoice.`;
+  const why = reason ? `Reason: ${reason}` : "";
+  return {
+    subject,
+    html: layout("Order declined", `<p>${esc(intro)}</p>${why ? `<p><b>${esc(why)}</b></p>` : ""}${detailsHtml(o)}${linesHtml(o)}<p style="font-size:13px;color:#555">You can place a new order from the trade portal if needed.</p>`),
+    text: `${intro}\n${why ? `\n${why}\n` : ""}\n${detailsText(o)}\n\n${linesText(o)}\n\nYou can place a new order from the trade portal if needed.`,
+  };
+}
+
+export function unleashedFailedEmail(o: OrderSummary, attempts: number, error: string, finalAttempt: boolean): Email {
+  const subject = `${finalAttempt ? "ACTION NEEDED: trade order not sent" : "Trade order retrying"}: ${o.reference ?? ""} ${o.companyName} PO ${o.poNumber}`;
+  const intro = finalAttempt
+    ? `This trade order couldn't be sent to Unleashed after ${attempts} attempts and won't be retried. Please enter it in Unleashed by hand (or fix the problem and contact the developer).`
+    : `This trade order couldn't be sent to Unleashed (attempt ${attempts}). It will be retried automatically every 5 minutes. The buyer has been told the order was received.`;
+  return {
+    subject,
+    html: layout(finalAttempt ? "Trade order not sent to Unleashed" : "Trade order retrying", `<p>${esc(intro)}</p><p style="font-family:monospace;font-size:12px;background:#f5f5f5;padding:8px">${esc(error)}</p>${detailsHtml(o)}${linesHtml(o)}`),
+    text: `${intro}\n\nError: ${error}\n\n${detailsText(o)}\n\n${linesText(o)}`,
+  };
+}

@@ -101,6 +101,7 @@ model TradeOrder {
   buyerName            String
   buyerEmail           String?
   companyId            String
+  companyName          String    @default("")
   locationId           String
   siteName             String
   customerCode         String // exact Unleashed customer code
@@ -110,11 +111,17 @@ model TradeOrder {
   lines                Json
   draftOrderId         String?
   draftOrderName       String?
-  status               String // pending | sent | failed
+  status               String // pending | sent | failed | awaiting-approval | rejected
   unleashedOrderNumber String?
-  payload              Json? // the Unleashed sales order as sent
+  payload              Json? // the Unleashed sales order as sent (prices locked when placed)
   attempts             Int      @default(0)
   lastError            String?
+  budgetExGst          Decimal?  @db.Decimal(14, 2) // site budget for the month when placed
+  committedBeforeExGst Decimal?  @db.Decimal(14, 2) // already ordered that month, before this order
+  approverName         String?
+  approverEmail        String?
+  decidedAt            DateTime?
+  decisionNote         String?
   createdAt            DateTime @default(now())
   updatedAt            DateTime @updatedAt
 
@@ -122,4 +129,21 @@ model TradeOrder {
   @@index([locationId, createdAt])
   @@index([companyId, createdAt])
   @@index([status])
+}
+
+// Site budgets: goods ex GST per Sydney calendar month. month = "default" (every month) or "YYYY-MM"
+// (that month only, overrides the default). No row = no limit.
+model SiteBudget {
+  id          String   @id @default(cuid())
+  shop        String
+  companyId   String
+  locationId  String
+  siteName    String
+  month       String
+  amountExGst Decimal  @db.Decimal(14, 2)
+  updatedBy   String?
+  updatedAt   DateTime @updatedAt
+
+  @@unique([shop, locationId, month])
+  @@index([shop, companyId])
 }

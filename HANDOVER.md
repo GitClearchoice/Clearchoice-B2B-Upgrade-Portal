@@ -67,10 +67,21 @@ Upload this file to the new Claude project, then start a chat with:
 - Dev store: stock comes from the Unleashed Shopify app's stock sync; some products still show 0 (Unleashed integration linking/warehouse), so the theme's backorder message shows. Live store sells when out of stock (inventory policy continue + theme's Back order button), so the app needs no stock logic.
 - Pricing changes in Unleashed show after the nightly full sync (or Render → clearchoice-b2b-sync → Trigger Run). A daytime changes-sync cron was offered and declined (27 Nov).
 
-**Phase 3 next:**
-1. Delete the test draft order and sandbox sales order. Hide the theme's cart footer for trade buyers (needs its class).
-2. Pick the email service (Postmark or Resend) for phase 4.
-3. Then phase 4: budgets/approvals and the email service. **Budget tracker goes in the Trade order block on the cart page** (asked 27 Nov), under the delivery site: this month's budget for the site, spent so far, this order, remaining after it; if the order would go over, say it will be sent to the head-office admin for approval (button text changes accordingly). Updates when the site is switched.
+**Phase 4 — budgets, approvals, emails: code written (28 Nov), not yet run on the store.** Email service: **Postmark** (decided 27 Nov).
+- Budgets live in the app's Postgres (`SiteBudget`), not a metaobject: per site, "default" (every month) or a `YYYY-MM` amount that overrides it; no row = no limit. Staff set them in the app: **Site budgets** page (search company → all its sites, every month / this month / next month, "set every month for all sites"; also shows the company's recent trade orders and their status).
+- Budget check at Place order (`src/orders/budget.ts`): Sydney calendar month, goods ex GST; committed = sent + sending + retrying (incl. approved); awaiting-approval and declined orders don't count. Over budget → draft tagged `awaiting-approval`, prices locked in the saved Unleashed payload, nothing sent.
+- Approver = company metafield `b2b.budget_admin_contact` (CompanyContact GID) → else company main contact → else `STAFF_EMAIL`. An order placed by the approver themselves isn't held.
+- Approval email has a **Review order** button → `https://<app>/approvals/<order id>?t=<signed token>` (HMAC with `SHOPIFY_API_SECRET`, 30 days; no Shopify login). Approve → sent to Unleashed with the locked prices, draft tagged `approved`; Decline (optional note) → `rejected`. A second click does nothing.
+- Emails (`src/email/`): buyer — order received / waiting for approval / approved / declined; admin — approval request (reply-to = buyer); staff — Unleashed failure on the first attempt and when retries run out. Email failures never stop an order.
+- Cart: budget tracker under the delivery site (`GET /apps/b2b/budget`): budget, already ordered, this order, remaining or over by, waiting for approval; over budget turns red and the button says **Send for approval**.
+- Migration `20261128000000_budgets` (checked against Postgres 16: applies cleanly, no drift). 102 tests pass.
+
+**Phase 4 next:**
+1. You: Postmark account → add sender signature / domain **clearchoiceproducts.com**, add its DKIM and Return-Path DNS records, create a Server and copy its **Server API token**.
+2. You: on Render, web service → Environment: `POSTMARK_SERVER_TOKEN` (the token) and `STAFF_EMAIL` (who gets failed orders). Blueprint → Manual Sync if the new keys don't appear. (Until the token is set, emails only go to the Render log.)
+3. You: `git pull` → `npm run shopify app deploy` (cart tracker). Render redeploys the web service from main (runs the migration).
+4. Test: app → **Site budgets** → Assetlink → small budget on the test buyer's site; make the test contact's company admin someone you can read (metafield `b2b.budget_admin_contact`, or use a site where the buyer isn't the admin); order within budget, then over budget → approval email → Approve → Unleashed; again → Decline.
+5. Phase 5: head-office admin's own "Site budgets" page in their customer account, annual summary, per-site order history + CSV.
 
 ---
 

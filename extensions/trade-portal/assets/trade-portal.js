@@ -143,6 +143,9 @@
     var errEl = el.querySelector("[data-cc-error]");
     var submitEl = el.querySelector("[data-cc-submit]");
     var poEl = el.querySelector("[data-cc-po]");
+    var budgetEl = el.querySelector("[data-cc-budget]");
+    var buttonLabel = "Place order";
+    var budget = null; // this month's site budget from the app, or null
     var noteEl = el.querySelector("[data-cc-note]");
     var doneEl = el.querySelector("[data-cc-done]");
     var requestKey = newKey();
@@ -175,9 +178,14 @@
           var bySku = {};
           cartItems.forEach(function (i) { if (i.sku) bySku[i.sku] = (bySku[i.sku] || 0) + i.quantity; });
           var req = Object.keys(bySku).map(function (s) { return { sku: s, quantity: bySku[s] }; });
-          return (req.length ? fetchPrices(proxy, location, req, true) : Promise.resolve({ lines: [], errors: [] })).then(function (body) {
+          return Promise.all([
+            req.length ? fetchPrices(proxy, location, req, true) : Promise.resolve({ lines: [], errors: [] }),
+            fetchBudget(),
+          ]).then(function (res) {
+            var body = res[0];
             var shownInTheme = showThemeBreaks(body);
             renderLines(body, noSku, shownInTheme);
+            renderBudget(goodsOf(body));
             priced = !noSku.length && !(body.errors && body.errors.length) && body.lines.length > 0;
             submitEl.disabled = !priced;
           });
@@ -185,6 +193,49 @@
         .catch(function (e) {
           linesEl.innerHTML = "<p class='cc-trade-order__line-error'>" + esc(e.message) + "</p>";
         });
+    }
+
+    function fetchBudget() {
+      if (!budgetEl) return Promise.resolve(null);
+      return fetch(proxy + "/budget" + (location ? "?location=" + encodeURIComponent(location) : ""), { headers: { Accept: "application/json" }, credentials: "same-origin" })
+        .then(readJson)
+        .then(function (b) { budget = b && b.trade && b.budget != null ? b : null; return budget; })
+        .catch(function () { budget = null; return null; }); // the server checks the budget anyway
+    }
+
+    function goodsOf(body) {
+      var price = {};
+      (body.lines || []).forEach(function (l) { price[l.sku] = l; });
+      var sub = 0;
+      cartItems.forEach(function (i) { var p = price[i.sku]; if (p) sub += Math.round(p.unitExGst * i.quantity * 100) / 100; });
+      return Math.round(sub * 100) / 100;
+    }
+
+    // Budget tracker under the delivery site: budget, ordered so far, this order, remaining.
+    function renderBudget(orderExGst) {
+      buttonLabel = "Place order";
+      if (!budgetEl) return;
+      if (!budget) { budgetEl.hidden = true; budgetEl.innerHTML = ""; submitEl.textContent = buttonLabel; return; }
+      var after = Math.round((budget.committed + orderExGst) * 100) / 100;
+      var left = Math.round((budget.budget - after) * 100) / 100;
+      var over = left < 0;
+      var pct = budget.budget > 0 ? Math.min(100, Math.round(after / budget.budget * 100)) : 100;
+      budgetEl.hidden = false;
+      budgetEl.classList.toggle("is-over", over);
+      budgetEl.innerHTML =
+        "<div class='cc-budget__title'>" + esc(budget.monthLabel) + " budget for this site</div>" +
+        "<div class='cc-budget__bar'><span style='width:" + pct + "%'></span></div>" +
+        "<dl class='cc-budget__rows'>" +
+        "<dt>Monthly budget</dt><dd>" + money(budget.budget) + "</dd>" +
+        "<dt>Already ordered this month</dt><dd>" + money(budget.committed) + "</dd>" +
+        "<dt>This order</dt><dd>" + money(orderExGst) + "</dd>" +
+        "<dt>" + (over ? "Over budget by" : "Remaining after this order") + "</dt><dd><strong>" + money(Math.abs(left)) + "</strong></dd>" +
+        "</dl>" +
+        (budget.awaitingApproval > 0 ? "<p class='cc-budget__note'>Also waiting for approval this month: " + money(budget.awaitingApproval) + "</p>" : "") +
+        (over ? "<p class='cc-budget__warn'>This order would take the site over its budget, so it will be sent to your head-office admin for approval before it goes to Clearchoice.</p>" : "") +
+        "<p class='cc-budget__note'>Goods only, ex GST and freight.</p>";
+      buttonLabel = over ? "Send for approval" : "Place order";
+      if (!busy) submitEl.textContent = buttonLabel;
     }
 
     // Quantity breaks under each quantity box in the theme's cart. Returns false if the theme's
@@ -299,9 +350,13 @@
           formEl.hidden = true;
           linesEl.hidden = true;
           doneEl.hidden = false;
-          doneEl.innerHTML = "<h3>Thank you, your order has been received.</h3>" +
-            "<p>Reference " + esc(res.body.reference || "") + (po ? ", PO " + esc(po) : "") +
-            ", delivering to " + esc(res.body.site) + ". Goods total " + money(res.body.goodsExGst) + " ex GST.</p>";
+          if (budgetEl) budgetEl.hidden = true;
+          var ref = "Reference " + esc(res.body.reference || "") + (po ? ", PO " + esc(po) : "") +
+            ", delivering to " + esc(res.body.site) + ". Goods total " + money(res.body.goodsExGst) + " ex GST.";
+          doneEl.innerHTML = res.body.status === "awaiting-approval"
+            ? "<h3>Your order has been sent for approval.</h3><p>It's over the site's monthly budget, so it has gone to " +
+              esc(res.body.approverName || "your head-office admin") + " to approve. We'll email you when it's approved or declined.</p><p>" + ref + "</p>"
+            : "<h3>Thank you, your order has been received.</h3><p>" + ref + " A confirmation has been emailed to you.</p>";
           requestKey = newKey();
           return fetch("/cart/clear.js", { method: "POST", credentials: "same-origin", headers: { Accept: "application/json" } });
         })
@@ -312,7 +367,7 @@
         })
         .finally(function () {
           busy = false;
-          submitEl.textContent = "Place order";
+          submitEl.textContent = buttonLabel;
         });
     }
 

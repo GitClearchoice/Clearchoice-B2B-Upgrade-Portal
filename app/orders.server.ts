@@ -3,6 +3,8 @@ import prisma from "./db.server";
 import { unauthenticated } from "./shopify.server";
 import { priceStore } from "./pricing.server";
 import { UnleashedClient } from "../src/unleashed/client.ts";
+import { LogSender, PostmarkSender, type EmailSender } from "../src/email/postmark.ts";
+import { budgetRepo } from "./budget.server";
 import {
   MAX_ATTEMPTS,
   retryFailedOrders,
@@ -14,9 +16,13 @@ import {
   type TradeOrderStatus,
 } from "../src/orders/placeOrder.ts";
 
+const dec = (d: Prisma.Decimal | null) => (d == null ? null : Number(d.toString()));
+
 const toRecord = (r: TradeOrder): TradeOrderRecord => ({
   ...r,
   goodsExGst: Number(r.goodsExGst.toString()),
+  budgetExGst: dec(r.budgetExGst),
+  committedBeforeExGst: dec(r.committedBeforeExGst),
   lines: r.lines as unknown as TradeOrderLine[],
   status: r.status as TradeOrderStatus,
 });
@@ -31,6 +37,10 @@ const toData = (patch: Partial<TradeOrderRecord>) => {
 };
 
 export const orderRepo: OrderRepo = {
+  async get(id) {
+    const r = await prisma.tradeOrder.findUnique({ where: { id } });
+    return r ? toRecord(r) : null;
+  },
   async findByRequestKey(shop, requestKey) {
     const r = await prisma.tradeOrder.findUnique({ where: { shop_requestKey: { shop, requestKey } } });
     return r ? toRecord(r) : null;
@@ -79,10 +89,28 @@ export function graphqlFor(admin: { graphql: (q: string, o?: { variables?: Recor
   };
 }
 
+let emailSender: EmailSender | null = null;
+export function emailer(): EmailSender {
+  if (!emailSender) {
+    const token = process.env.POSTMARK_SERVER_TOKEN;
+    emailSender = token
+      ? new PostmarkSender({ serverToken: token, from: process.env.EMAIL_FROM ?? "Clearchoice Products <service@clearchoiceproducts.com>" })
+      : new LogSender((m) => console.log(`[email] ${m}`));
+  }
+  return emailSender;
+}
+
 export function orderDeps(shopify: ShopifyGraphql): OrderDeps {
   const c = unleashedClient();
   return {
     shopify,
+    budgets: budgetRepo,
+    email: emailer(),
+    notify: {
+      appUrl: process.env.SHOPIFY_APP_URL ?? "",
+      tokenSecret: process.env.SHOPIFY_API_SECRET ?? "",
+      staffEmail: process.env.STAFF_EMAIL || null,
+    },
     unleashed: { post: (p, b) => c.post(p, b), get: (p) => c.get(p), warehouses: () => c.warehouses(), taxes: () => c.taxes() },
     store: priceStore,
     orders: orderRepo,

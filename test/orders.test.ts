@@ -15,6 +15,9 @@ import {
 
 class MemRepo implements OrderRepo {
   rows = new Map<string, TradeOrderRecord>();
+  async get(id: string) {
+    return this.rows.get(id) ?? null;
+  }
   async findByRequestKey(shop: string, key: string) {
     return [...this.rows.values()].find((r) => r.shop === shop && r.requestKey === key) ?? null;
   }
@@ -29,7 +32,7 @@ class MemRepo implements OrderRepo {
     this.rows.delete(id);
   }
   async listForRetry(max: number) {
-    return [...this.rows.values()].filter((r) => r.status !== "sent" && r.attempts < max);
+    return [...this.rows.values()].filter((r) => (r.status === "failed" || r.status === "pending") && r.attempts < max);
   }
 }
 
