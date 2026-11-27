@@ -244,6 +244,14 @@ export const action = async ({ request }: ActionFunctionArgs) => {
   return { saved: true };
 };
 
+// Tables scroll inside their own box with the headings pinned to the top, so long site lists keep
+// their column headings in view.
+const scrollBox: React.CSSProperties = { maxHeight: "70vh", overflow: "auto", border: "1px solid #e3e3e3", borderRadius: 8 };
+const table: React.CSSProperties = { width: "100%", borderCollapse: "separate", borderSpacing: 0, fontSize: 13 };
+const th: React.CSSProperties = { position: "sticky", top: 0, zIndex: 1, background: "#f7f7f7", textAlign: "left", fontWeight: 600, padding: "8px 10px", borderBottom: "1px solid #d4d4d4", whiteSpace: "nowrap" };
+const td: React.CSSProperties = { padding: "6px 10px", borderBottom: "1px solid #eee", verticalAlign: "middle" };
+const tdTotal: React.CSSProperties = { ...td, fontWeight: 600, position: "sticky", bottom: 0, background: "#fff", borderTop: "1px solid #d4d4d4" };
+
 const money = (n: number) => "$" + n.toLocaleString("en-AU", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
 const statusLabel: Record<string, string> = {
   sent: "Sent to Unleashed",
@@ -327,16 +335,19 @@ export default function Budgets() {
             <input type="hidden" name="company" value={data.company.id} />
             <s-stack direction="block" gap="base">
               <s-text-field label="Set 'every month' for all sites (optional)" name="allDefault" placeholder="e.g. 2000" />
-              <s-table>
-                <s-table-header-row>
-                  <s-table-header>Site</s-table-header>
-                  <s-table-header>Every month</s-table-header>
-                  {data.labels.map((l) => <s-table-header key={l}>{l}</s-table-header>)}
-                </s-table-header-row>
-                <s-table-body>
+              <div style={scrollBox}>
+              <table style={table}>
+                <thead>
+                  <tr>
+                    <th style={th}>Site</th>
+                    <th style={th}>Every month</th>
+                    {data.labels.map((l) => <th style={th} key={l}>{l}</th>)}
+                  </tr>
+                </thead>
+                <tbody>
                   {data.company.sites.map((s) => (
-                    <s-table-row key={s.id}>
-                      <s-table-cell>
+                    <tr key={s.id}>
+                      <td style={td}>
                         {s.name}
                         {s.dormant && (
                           <>
@@ -345,15 +356,16 @@ export default function Budgets() {
                             <s-text color="subdued">{s.lastOrderAt ? ` Last order ${new Date(s.lastOrderAt).toLocaleDateString("en-AU", { timeZone: "Australia/Sydney" })}` : " No orders found"}</s-text>
                           </>
                         )}
-                      </s-table-cell>
-                      <s-table-cell><s-text-field label="Every month" labelAccessibilityVisibility="exclusive" name={`default:${s.id}`} value={s.default?.toString() ?? ""} /></s-table-cell>
+                      </td>
+                      <td style={td}><s-text-field label="Every month" labelAccessibilityVisibility="exclusive" name={`default:${s.id}`} value={s.default?.toString() ?? ""} /></td>
                       {s.months.map((v, i) => (
-                        <s-table-cell key={i}><s-text-field label={data.labels[i]!} labelAccessibilityVisibility="exclusive" name={`m${i}:${s.id}`} value={v?.toString() ?? ""} /></s-table-cell>
+                        <td style={td} key={i}><s-text-field label={data.labels[i]!} labelAccessibilityVisibility="exclusive" name={`m${i}:${s.id}`} value={v?.toString() ?? ""} /></td>
                       ))}
-                    </s-table-row>
+                    </tr>
                   ))}
-                </s-table-body>
-              </s-table>
+                </tbody>
+              </table>
+              </div>
               <s-button type="submit" variant="primary" {...(busy ? { loading: true } : {})}>Save budgets</s-button>
             </s-stack>
           </Form>
@@ -402,35 +414,41 @@ export default function Budgets() {
             Goods ex GST. Budget = the three months added up ("No budget" if any month has none). Ordered = sent to
             Clearchoice (incl. approved orders); declined orders don't count.
           </s-paragraph>
-          <s-table>
-            <s-table-header-row>
-              <s-table-header>Site</s-table-header>
-              <s-table-header>Quarter budget</s-table-header>
-              <s-table-header>Ordered</s-table-header>
-              <s-table-header>Waiting for approval</s-table-header>
-              <s-table-header>Remaining</s-table-header>
-            </s-table-header-row>
-            <s-table-body>
-              {data.summary.rows.map((r) => (
-                <s-table-row key={r.id}>
-                  <s-table-cell>{r.name}</s-table-cell>
-                  <s-table-cell>{r.budget == null ? "No budget" : money(r.budget)}</s-table-cell>
-                  <s-table-cell>{money(r.ordered)}</s-table-cell>
-                  <s-table-cell>{r.awaiting ? money(r.awaiting) : "–"}</s-table-cell>
-                  <s-table-cell>
-                    {r.remaining == null ? "–" : r.remaining < 0 ? <s-text tone="critical">Over by {money(-r.remaining)}</s-text> : money(r.remaining)}
-                  </s-table-cell>
-                </s-table-row>
-              ))}
-              <s-table-row>
-                <s-table-cell><s-text type="strong">All sites</s-text></s-table-cell>
-                <s-table-cell><s-text type="strong">{money(data.summary.totals.budget)}{data.summary.totals.unbudgeted ? ` (+${data.summary.totals.unbudgeted} without budget)` : ""}</s-text></s-table-cell>
-                <s-table-cell><s-text type="strong">{money(data.summary.totals.ordered)}</s-text></s-table-cell>
-                <s-table-cell><s-text type="strong">{data.summary.totals.awaiting ? money(data.summary.totals.awaiting) : "–"}</s-text></s-table-cell>
-                <s-table-cell />
-              </s-table-row>
-            </s-table-body>
-          </s-table>
+          <div style={scrollBox}>
+            <table style={table}>
+              <thead>
+                <tr>
+                  <th style={th}>Site</th>
+                  <th style={{ ...th, textAlign: "right" }}>Quarter budget</th>
+                  <th style={{ ...th, textAlign: "right" }}>Ordered</th>
+                  <th style={{ ...th, textAlign: "right" }}>Waiting for approval</th>
+                  <th style={{ ...th, textAlign: "right" }}>Remaining</th>
+                </tr>
+              </thead>
+              <tbody>
+                {data.summary.rows.map((r) => (
+                  <tr key={r.id}>
+                    <td style={td}>{r.name}</td>
+                    <td style={{ ...td, textAlign: "right" }}>{r.budget == null ? "No budget" : money(r.budget)}</td>
+                    <td style={{ ...td, textAlign: "right" }}>{money(r.ordered)}</td>
+                    <td style={{ ...td, textAlign: "right" }}>{r.awaiting ? money(r.awaiting) : "–"}</td>
+                    <td style={{ ...td, textAlign: "right", ...(r.remaining != null && r.remaining < 0 ? { color: "#c00", fontWeight: 600 } : {}) }}>
+                      {r.remaining == null ? "–" : r.remaining < 0 ? `Over by ${money(-r.remaining)}` : money(r.remaining)}
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+              <tfoot>
+                <tr>
+                  <td style={tdTotal}>All sites</td>
+                  <td style={{ ...tdTotal, textAlign: "right" }}>{money(data.summary.totals.budget)}{data.summary.totals.unbudgeted ? ` (+${data.summary.totals.unbudgeted} without budget)` : ""}</td>
+                  <td style={{ ...tdTotal, textAlign: "right" }}>{money(data.summary.totals.ordered)}</td>
+                  <td style={{ ...tdTotal, textAlign: "right" }}>{data.summary.totals.awaiting ? money(data.summary.totals.awaiting) : "–"}</td>
+                  <td style={tdTotal} />
+                </tr>
+              </tfoot>
+            </table>
+          </div>
         </s-section>
       )}
 
