@@ -40,6 +40,33 @@
     });
   }
 
+  // ---------- Cart change detection ----------
+  // Themes update the cart with AJAX (/cart/change, /cart/update, /cart/add…) and many don't fire
+  // any event. Watch those requests and tell the Trade order block to re-price.
+  var CART_WRITE = /\/cart\/(add|change|update|clear)(\.js)?(\?|$)/;
+  function cartChanged() {
+    document.dispatchEvent(new CustomEvent("cc:cart-changed"));
+  }
+  function isCartWrite(url) {
+    try { return CART_WRITE.test(new URL(url, window.location.href).pathname); } catch (e) { return false; }
+  }
+  if (window.fetch) {
+    var origFetch = window.fetch;
+    window.fetch = function (input, init) {
+      var url = typeof input === "string" ? input : (input && input.url) || "";
+      var p = origFetch.apply(this, arguments);
+      if (isCartWrite(url)) p.then(function () { setTimeout(cartChanged, 0); }, function () {});
+      return p;
+    };
+  }
+  if (window.XMLHttpRequest) {
+    var origOpen = XMLHttpRequest.prototype.open;
+    XMLHttpRequest.prototype.open = function (method, url) {
+      if (isCartWrite(url)) this.addEventListener("loadend", function () { setTimeout(cartChanged, 0); });
+      return origOpen.apply(this, arguments);
+    };
+  }
+
   // ---------- Product page ----------
   function initProductPrice(el) {
     var variants = [];
@@ -243,9 +270,18 @@
         });
     }
 
-    // Themes update the cart with AJAX; re-price when the cart changes.
-    document.addEventListener("cart:updated", load);
-    document.addEventListener("cart:refresh", load);
+    // Themes update the cart with AJAX; re-price when the cart changes (once the order is placed, stop).
+    var reloadTimer;
+    var reload = function () {
+      if (!doneEl.hidden || busy) return;
+      clearTimeout(reloadTimer);
+      reloadTimer = setTimeout(load, 300);
+    };
+    document.addEventListener("cc:cart-changed", reload);
+    document.addEventListener("cart:updated", reload);
+    document.addEventListener("cart:refresh", reload);
+    // Cart edited in another tab.
+    document.addEventListener("visibilitychange", function () { if (!document.hidden) reload(); });
     load();
   }
 
