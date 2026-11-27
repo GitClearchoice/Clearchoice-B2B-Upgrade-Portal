@@ -282,6 +282,23 @@
     document.addEventListener("cart:refresh", reload);
     // Cart edited in another tab.
     document.addEventListener("visibilitychange", function () { if (!document.hidden) reload(); });
+    // Safety net for themes that change the cart some other way: after any click or change on the
+    // page, and every few seconds while the tab is visible, compare the cart with what was priced.
+    var checking = false;
+    function checkCart() {
+      if (checking || busy || !doneEl.hidden || document.hidden) return;
+      checking = true;
+      fetch("/cart.js", { headers: { Accept: "application/json" }, credentials: "same-origin" })
+        .then(function (r) { return r.json(); })
+        .then(function (cart) { if (sigOf(cart.items || []) !== cartSig) reload(); })
+        .catch(function () {})
+        .finally(function () { checking = false; });
+    }
+    var nudgeTimer;
+    var nudge = function () { clearTimeout(nudgeTimer); nudgeTimer = setTimeout(checkCart, 1200); };
+    document.addEventListener("click", nudge, true);
+    document.addEventListener("change", nudge, true);
+    setInterval(checkCart, 4000);
     load();
   }
 
