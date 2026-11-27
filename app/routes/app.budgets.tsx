@@ -189,7 +189,10 @@ export const action = async ({ request }: ActionFunctionArgs) => {
   if (intent === "sync") {
     try {
       const r = await syncSites(graphqlFor(admin), session.shop);
-      return { synced: `Checked ${r.sites} sites against Unleashed: ${r.closed.length} closed, ${r.reopened.length} reopened.${r.errors.length ? ` ${r.errors.length} errors: ${r.errors.slice(0, 3).join("; ")}` : ""}` };
+      return {
+        synced: `Checked ${r.sites} sites against Unleashed: ${r.changes.length} added or updated, ${r.closed.length} closed, ${r.reopened.length} reopened.${r.errors.length ? ` ${r.errors.length} errors.` : ""}`,
+        details: [...r.changes, ...r.closed.map((c) => `Closed: ${c}`), ...r.reopened.map((c) => `Reopened: ${c}`), ...r.errors.map((e) => `Error: ${e}`)],
+      };
     } catch (e) {
       return { error: `Unleashed check failed: ${(e as Error).message}` };
     }
@@ -294,10 +297,19 @@ export default function Budgets() {
           </s-paragraph>
           {result && "error" in result && <s-banner tone="critical">{result.error}</s-banner>}
           {result && "saved" in result && <s-banner tone="success">Budgets saved.</s-banner>}
-          {result && "synced" in result && <s-banner tone="success">{result.synced}</s-banner>}
+          {result && "synced" in result && (
+            <s-banner tone="success">
+              {result.synced}
+              {"details" in result && result.details && result.details.length > 0 && (
+                <s-unordered-list>
+                  {result.details.slice(0, 100).map((d, i) => <s-list-item key={i}>{d}</s-list-item>)}
+                </s-unordered-list>
+              )}
+            </s-banner>
+          )}
           <s-stack direction="inline" gap="base">
             <s-text>
-              "Dormant" = no order for 6 months (Unleashed orders and portal orders; checked daily).
+              Sites follow Unleashed daily: names, addresses and delivery notes are updated, new Delivery tab sites are added and obsolete ones closed. "Dormant" = no order for 6 months.
               {data.company.closedSites.length > 0 && ` ${data.company.closedSites.length} closed site(s) hidden.`}
             </s-text>
             {data.company.closedSites.length > 0 && (
@@ -308,7 +320,7 @@ export default function Budgets() {
             <Form method="post">
               <input type="hidden" name="company" value={data.company.id} />
               <input type="hidden" name="intent" value="sync" />
-              <s-button type="submit" variant="tertiary" {...(busy ? { loading: true } : {})}>Check Unleashed for closed sites now</s-button>
+              <s-button type="submit" variant="tertiary" {...(busy ? { loading: true } : {})}>Update sites from Unleashed now</s-button>
             </Form>
           </s-stack>
           <Form method="post" key={params.toString() + (result && "saved" in result ? Date.now() : "")}>

@@ -7,6 +7,9 @@ import { emailer, graphqlFor } from "./orders.server";
 import { UnleashedClient } from "../src/unleashed/client.ts";
 import { lastOrdersFromUnleashed, planSiteChanges, DORMANT_MONTHS, type CloseSource, type PortalSite, type SiteState } from "../src/b2b/siteStatus.ts";
 import { siteClosedEmail } from "../src/email/templates.ts";
+import { applyCompany, loadPaymentTermsTemplates, planCompany, planGroup, type CompanyPlan } from "../src/b2b/import.ts";
+import { PostcodeLookup } from "../src/b2b/address.ts";
+import type { UAddress, UCustomer } from "../src/unleashed/types.ts";
 import type { ShopifyGraphql } from "../src/orders/placeOrder.ts";
 
 const COMPANY_IDS = `#graphql
@@ -124,9 +127,73 @@ function unleashed() {
 
 export interface SiteSyncResult {
   sites: number;
+  /** Sites added or updated from Unleashed (names, addresses, delivery notes, new Delivery tab entries). */
+  changes: string[];
   closed: string[];
   reopened: string[];
   errors: string[];
+}
+
+const TRADE_COMPANIES = `#graphql
+  query SiteRefreshCompanies($after: String) {
+    companies(first: 250, after: $after) {
+      nodes {
+        id
+        name
+        externalId
+        code: metafield(namespace: "unleashed", key: "customer_code") { value }
+        members: metafield(namespace: "unleashed", key: "group_members") { value }
+      }
+      pageInfo { hasNextPage endCursor }
+    }
+  }`;
+
+/**
+ * Brings existing trade companies' sites into line with Unleashed: fixes names, addresses and delivery
+ * notes, and adds new Delivery tab sites (given to the company's head-office admin). Doesn't create
+ * companies or change contacts. Same rules as the phase 2 import (src/b2b/import.ts).
+ */
+export async function refreshSitesFromUnleashed(
+  shopify: ShopifyGraphql,
+  u: { customers: UCustomer[]; delivery: { CustomerCode: string; Addresses?: UAddress[] | null }[] },
+): Promise<{ changes: string[]; errors: string[] }> {
+  const byCode = new Map(u.customers.map((c) => [c.CustomerCode, c]));
+  const sitesByCode = new Map(u.delivery.map((d) => [d.CustomerCode, d.Addresses ?? []]));
+  const lookup = new PostcodeLookup().learn(u.customers.flatMap((c) => c.Addresses ?? [])).learn(u.delivery.flatMap((d) => d.Addresses ?? []));
+  const netDays = Number(process.env.DEFAULT_NET_DAYS ?? 30);
+  const admin = { graphql: <T,>(q: string, v: Record<string, unknown> = {}) => shopify<T>(q, v) };
+  const templates = await loadPaymentTermsTemplates(admin as never);
+
+  const companies: { id: string; name: string; externalId: string | null; code: string | null; members: string | null }[] = [];
+  let after: string | null = null;
+  for (let i = 0; i < 20; i++) {
+    const d: { companies: { nodes: { id: string; name: string; externalId: string | null; code: { value: string } | null; members: { value: string } | null }[]; pageInfo: { hasNextPage: boolean; endCursor: string } } } =
+      await shopify(TRADE_COMPANIES, { after });
+    companies.push(...d.companies.nodes.map((c) => ({ id: c.id, name: c.name, externalId: c.externalId, code: c.code?.value?.trim() || null, members: c.members?.value ?? null })));
+    if (!d.companies.pageInfo.hasNextPage) break;
+    after = d.companies.pageInfo.endCursor;
+  }
+
+  const changes: string[] = [];
+  const errors: string[] = [];
+  for (const c of companies) {
+    let plan: CompanyPlan | null = null;
+    if (c.externalId?.startsWith("GROUP:")) {
+      const members = (c.members ?? "").split(";").map((m) => m.trim()).filter(Boolean)
+        .map((code) => byCode.get(code))
+        .filter((cust): cust is UCustomer => !!cust && !cust.Obsolete)
+        .map((cust) => ({ code: cust.CustomerCode, name: (cust.CustomerName ?? cust.CustomerCode).trim(), plan: planCompany(cust, sitesByCode.get(cust.CustomerCode), netDays, lookup) }));
+      if (members.length) plan = planGroup(c.externalId.slice("GROUP:".length), members);
+    } else if (c.code) {
+      const cust = byCode.get(c.code);
+      if (cust && !cust.Obsolete) plan = planCompany(cust, sitesByCode.get(c.code), netDays, lookup);
+    }
+    if (!plan || !plan.sites.length) continue;
+    const r = await applyCompany({ admin: admin as never, dryRun: false, templates, companyMap: { [plan.code]: c.id }, updateExisting: true, sitesOnly: true }, plan);
+    changes.push(...r.changes.map((x) => `${c.name}: ${x}`));
+    if (r.status === "error") errors.push(`${c.name}: ${r.notes[r.notes.length - 1]}`);
+  }
+  return { changes, errors };
 }
 
 /**
@@ -134,9 +201,11 @@ export interface SiteSyncResult {
  * record each site's last order date (Unleashed sales orders for the last 6+ months, plus portal orders).
  */
 export async function syncSites(shopify: ShopifyGraphql, shop: string, log = (m: string) => console.log(`[sites] ${m}`)): Promise<SiteSyncResult> {
-  const sites = await shopifySites(shopify);
   const client = unleashed();
   const [customers, delivery] = await Promise.all([client.customers({ includeObsolete: true }), client.customerDeliveryAddresses()]);
+  // 1. Site details and new sites from Unleashed, then 2. closures (on the refreshed list).
+  const refreshed = await refreshSitesFromUnleashed(shopify, { customers, delivery });
+  const sites = await shopifySites(shopify);
   const u = {
     customers: new Map(customers.map((c) => [c.CustomerCode, c])),
     delivery: new Map(delivery.map((d) => [d.CustomerCode, d.Addresses ?? []])),
@@ -146,7 +215,7 @@ export async function syncSites(shopify: ShopifyGraphql, shop: string, log = (m:
   // Closed in Shopify but not in the DB (e.g. set by hand): treat as closed by staff.
   for (const s of sites) if (s.closedInShopify && !state.get(s.locationId)?.closed) state.set(s.locationId, { closed: true, source: "staff" });
 
-  const res: SiteSyncResult = { sites: sites.length, closed: [], reopened: [], errors: [] };
+  const res: SiteSyncResult = { sites: sites.length, changes: refreshed.changes, closed: [], reopened: [], errors: [...refreshed.errors] };
   for (const c of planSiteChanges(sites, state, u)) {
     try {
       await setSiteClosed(shopify, shop, c.site, c.action === "close", { source: "unleashed", reason: c.reason, by: "Unleashed sync" });
@@ -175,7 +244,7 @@ export async function syncSites(shopify: ShopifyGraphql, shop: string, log = (m:
       update: { siteName: s.name, ...(lastOrderAt ? { lastOrderAt } : {}) },
     });
   }
-  log(`${shop}: ${sites.length} sites, ${res.closed.length} closed, ${res.reopened.length} reopened, ${orders.length} Unleashed orders read${res.errors.length ? `, ${res.errors.length} errors` : ""}`);
+  log(`${shop}: ${sites.length} sites, ${res.changes.length} added/updated, ${res.closed.length} closed, ${res.reopened.length} reopened, ${orders.length} Unleashed orders read${res.errors.length ? `, ${res.errors.length} errors` : ""}`);
   return res;
 }
 

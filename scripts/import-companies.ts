@@ -85,7 +85,7 @@ const ctx = { admin, dryRun: !apply, templates, companyMap };
 
 const results: ImportResult[] = [];
 const plans: CompanyPlan[] = [];
-const notFound = (code: string): ImportResult => ({ code, name: "", status: "error", companyId: "", sitesCreated: 0, sitesExisting: 0, sitesSkipped: [], contact: "", paymentTerms: "", notes: ["not found in Unleashed"] });
+const notFound = (code: string): ImportResult => ({ code, name: "", status: "error", companyId: "", sitesCreated: 0, sitesExisting: 0, sitesUpdated: 0, changes: [], sitesSkipped: [], contact: "", paymentTerms: "", notes: ["not found in Unleashed"] });
 
 // Work units: single customers, plus one unit per group that has any member in the list.
 type Unit = { label: string; plan: () => Promise<CompanyPlan | ImportResult> };

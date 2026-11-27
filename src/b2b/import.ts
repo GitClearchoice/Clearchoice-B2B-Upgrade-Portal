@@ -173,11 +173,18 @@ export function planGroup(groupName: string, members: { code: string; name: stri
 export interface PaymentTermsTemplate { id: string; name: string; paymentTermsType: string; dueInDays: number | null }
 
 export interface ImportContext {
-  admin: ShopifyAdmin;
+  admin: Pick<ShopifyAdmin, "graphql">;
   dryRun: boolean;
   templates: PaymentTermsTemplate[];
   /** Unleashed code → Shopify company GID, remembered between runs. */
   companyMap: Record<string, string>;
+  /** Also bring existing sites' name, address and delivery note into line with Unleashed (daily site refresh). */
+  updateExisting?: boolean;
+  /**
+   * Sites only (daily site refresh): don't touch contacts, main contact or the budget admin flag (staff
+   * may have changed them in Shopify); new sites go to whoever already has every existing site.
+   */
+  sitesOnly?: boolean;
 }
 
 export interface ImportResult {
@@ -187,25 +194,33 @@ export interface ImportResult {
   companyId: string;
   sitesCreated: number;
   sitesExisting: number;
+  sitesUpdated: number;
+  /** Human-readable list of what was created or changed (shown after a manual site refresh). */
+  changes: string[];
   sitesSkipped: string[];
   contact: string;
   paymentTerms: string;
   notes: string[];
 }
 
+type ExistingAddress = { address1: string | null; address2: string | null; city: string | null; zoneCode: string | null; zip: string | null; countryCode: string | null; recipient: string | null } | null;
+interface ExistingLocation { id: string; externalId: string | null; name: string; note?: string | null; shippingAddress?: ExistingAddress }
+
 interface ExistingCompany {
   id: string;
   externalId: string | null;
   mainContact: { id: string } | null;
-  locations: { id: string; externalId: string | null; name: string }[];
+  locations: ExistingLocation[];
   contacts: { id: string; email: string | null; customerId: string | null; locationIdsWithRole: string[] }[];
   roles: { id: string; name: string }[];
 }
 
+const LOCATION_FIELDS = "id externalId name note shippingAddress { address1 address2 city zoneCode zip countryCode recipient }";
+
 const COMPANY_FIELDS = `
   id externalId
   mainContact { id }
-  locations(first: 100) { nodes { id externalId name } pageInfo { hasNextPage endCursor } }
+  locations(first: 100) { nodes { ${LOCATION_FIELDS} } pageInfo { hasNextPage endCursor } }
   contacts(first: 10) { nodes { id customer { id email } roleAssignments(first: 25) { nodes { companyLocation { id } } pageInfo { hasNextPage endCursor } } } }
   contactRoles(first: 10) { nodes { id name } }
 `;
@@ -214,7 +229,7 @@ type PageInfo = { hasNextPage: boolean; endCursor: string | null };
 
 type RawCompany = {
   id: string; externalId: string | null; mainContact: { id: string } | null;
-  locations: { nodes: { id: string; externalId: string | null; name: string }[]; pageInfo?: PageInfo };
+  locations: { nodes: ExistingLocation[]; pageInfo?: PageInfo };
   contacts: { nodes: { id: string; customer: { id: string; email: string | null } | null; roleAssignments: { nodes: { companyLocation: { id: string } | null }[]; pageInfo?: PageInfo } }[] };
   contactRoles: { nodes: { id: string; name: string }[] };
 };
@@ -267,11 +282,11 @@ export async function findCompany(ctx: ImportContext, code: string): Promise<Exi
 }
 
 async function allLocations(ctx: ImportContext, companyId: string) {
-  const out: { id: string; externalId: string | null; name: string }[] = [];
+  const out: ExistingLocation[] = [];
   let after: string | null = null;
   for (;;) {
     const r: { company: { locations: { nodes: typeof out; pageInfo: PageInfo } } } = await ctx.admin.graphql(
-      `query($id: ID!, $after: String) { company(id: $id) { locations(first: 250, after: $after) { nodes { id externalId name } pageInfo { hasNextPage endCursor } } } }`,
+      `query($id: ID!, $after: String) { company(id: $id) { locations(first: 250, after: $after) { nodes { ${LOCATION_FIELDS} } pageInfo { hasNextPage endCursor } } } }`,
       { id: companyId, after },
     );
     out.push(...r.company.locations.nodes);
@@ -330,7 +345,7 @@ function locationInput(site: PlannedSite, templateId: string | undefined) {
 
 export async function applyCompany(ctx: ImportContext, plan: CompanyPlan): Promise<ImportResult> {
   const result: ImportResult = {
-    code: plan.code, name: plan.name, status: "unchanged", companyId: "", sitesCreated: 0, sitesExisting: 0,
+    code: plan.code, name: plan.name, status: "unchanged", companyId: "", sitesCreated: 0, sitesExisting: 0, sitesUpdated: 0, changes: [],
     sitesSkipped: plan.skippedSites.map((s) => `${s.name}: ${s.reason}`), contact: "", paymentTerms: "", notes: [...plan.notes],
   };
   if (!plan.sites.length) { result.status = "skipped"; return result; }
@@ -389,9 +404,23 @@ export async function applyCompany(ctx: ImportContext, plan: CompanyPlan): Promi
 
     // 2. Remaining sites
     const byExt = new Map(company.locations.map((l) => [l.externalId ?? "", l]));
+    const existingIds = new Set(company.locations.map((l) => l.id));
     for (const site of plan.sites) {
-      if (byExt.has(shopifyExternalId(site.externalId)) || byExt.has(site.externalId)) {
+      const have = byExt.get(shopifyExternalId(site.externalId)) ?? byExt.get(site.externalId);
+      if (have) {
         if (!(result.status === "created" && site === plan.sites[0])) result.sitesExisting++;
+        if (ctx.updateExisting && !dry) {
+          try {
+            const what = await updateLocation(ctx, have, site);
+            if (what.length) {
+              result.sitesUpdated++;
+              result.changes.push(`Updated ${have.name === site.name ? site.name : `"${have.name}" → "${site.name}"`}: ${what.join(", ")}`);
+              changed = true;
+            }
+          } catch (e) {
+            result.changes.push(`Couldn't update ${site.name}: ${(e as Error).message}`);
+          }
+        }
         continue;
       }
       let id: string;
@@ -418,6 +447,7 @@ export async function applyCompany(ctx: ImportContext, plan: CompanyPlan): Promi
       company.locations.push({ id, externalId: shopifyExternalId(site.externalId), name: site.name });
       byExt.set(shopifyExternalId(site.externalId), company.locations[company.locations.length - 1]);
       result.sitesCreated++;
+      result.changes.push(`Added site ${site.name}`);
       changed = true;
       newSiteCodes.push({ id, code: site.customerCode ?? plan.code });
     }
@@ -431,6 +461,25 @@ export async function applyCompany(ctx: ImportContext, plan: CompanyPlan): Promi
         );
         assertNoUserErrors(`Saving Unleashed codes on sites of ${plan.code}`, r.metafieldsSet.userErrors);
       }
+    }
+
+    // Daily site refresh: give new sites to the contacts who already have every existing site
+    // (the head-office admin(s)); leave contacts and the budget admin as staff set them.
+    if (ctx.sitesOnly) {
+      const newIds = company.locations.filter((l) => !existingIds.has(l.id)).map((l) => l.id);
+      if (newIds.length && !dry && existingIds.size) {
+        const role = company.roles.find((r) => /admin/i.test(r.name)) ?? company.roles.find((r) => /order/i.test(r.name)) ?? company.roles[0];
+        for (const c of company.contacts) {
+          if (!role || ![...existingIds].every((id) => c.locationIdsWithRole.includes(id))) continue;
+          const r = await ctx.admin.graphql<{ companyContactAssignRoles: { userErrors: UserError[] } }>(
+            `mutation($id: ID!, $roles: [CompanyContactRoleAssign!]!) { companyContactAssignRoles(companyContactId: $id, rolesToAssign: $roles) { userErrors { field message code } } }`,
+            { id: c.id, roles: newIds.map((l) => ({ companyContactRoleId: role.id, companyLocationId: l })) },
+          );
+          assertNoUserErrors(`Giving ${c.email ?? c.id} the new sites of ${plan.code}`, r.companyContactAssignRoles.userErrors);
+        }
+      }
+      if (result.status !== "created") result.status = changed ? "updated" : "unchanged";
+      return result;
     }
 
     // 3. Head-office admin = Unleashed primary contact
@@ -514,6 +563,38 @@ export async function applyCompany(ctx: ImportContext, plan: CompanyPlan): Promi
     result.notes.push((e as Error).message);
     return result;
   }
+}
+
+const ADDRESS_KEYS = ["address1", "address2", "city", "zoneCode", "zip", "countryCode", "recipient"] as const;
+const clean = (v: unknown) => String(v ?? "").trim();
+
+/** What differs between a Shopify site and its Unleashed version (empty = nothing). */
+export function siteDifferences(have: ExistingLocation, want: PlannedSite): string[] {
+  const out: string[] = [];
+  if (clean(have.name) !== clean(want.name)) out.push("name");
+  const a = have.shippingAddress;
+  if (!a || ADDRESS_KEYS.some((k) => clean(a[k]) !== clean(want.address[k]))) out.push("address");
+  if (clean(have.note) !== clean(want.note)) out.push("delivery note");
+  return out;
+}
+
+async function updateLocation(ctx: ImportContext, have: ExistingLocation, want: PlannedSite): Promise<string[]> {
+  const diff = siteDifferences(have, want);
+  if (diff.includes("name") || diff.includes("delivery note")) {
+    const r = await ctx.admin.graphql<{ companyLocationUpdate: { userErrors: UserError[] } }>(
+      `mutation($id: ID!, $input: CompanyLocationUpdateInput!) { companyLocationUpdate(companyLocationId: $id, input: $input) { userErrors { field message code } } }`,
+      { id: have.id, input: { name: want.name, note: want.note ?? "" } },
+    );
+    assertNoUserErrors(`Updating site ${want.name}`, r.companyLocationUpdate.userErrors);
+  }
+  if (diff.includes("address")) {
+    const r = await ctx.admin.graphql<{ companyLocationAssignAddress: { userErrors: UserError[] } }>(
+      `mutation($id: ID!, $address: CompanyAddressInput!) { companyLocationAssignAddress(locationId: $id, address: $address, addressTypes: [SHIPPING, BILLING]) { userErrors { field message code } } }`,
+      { id: have.id, address: want.address },
+    );
+    assertNoUserErrors(`Updating the address of ${want.name}`, r.companyLocationAssignAddress.userErrors);
+  }
+  return diff;
 }
 
 async function createOrAttachContact(
