@@ -22,14 +22,17 @@ const COMPANIES = `#graphql
 type CompanyRow = { id: string; name: string; externalId: string | null; locationsCount: { count: number } };
 
 async function searchCompanies(admin: Gql, q: string): Promise<CompanyRow[]> {
+  // Words in any order, ignoring case; also ignoring spaces and punctuation ("facility master" finds "FacilityMaster", "FACILITY-MASTER").
+  const compact = (t: string) => t.toLowerCase().replace(/[^a-z0-9]/g, "");
   const words = q.toLowerCase().split(/\s+/).filter(Boolean);
+  const whole = compact(q);
   const out: CompanyRow[] = [];
   let after: string | null = null;
   for (let page = 0; page < 20; page++) {
     const d: { companies: { nodes: CompanyRow[]; pageInfo: { hasNextPage: boolean; endCursor: string } } } = await gql(admin, COMPANIES, { after });
     for (const c of d.companies.nodes) {
-      const text = `${c.name} ${c.externalId ?? ""}`.toLowerCase();
-      if (words.every((w) => text.includes(w))) out.push(c);
+      const text = `${c.name} ${c.externalId ?? ""}`.toLowerCase().replace(/\s+/g, " ");
+      if (words.every((w) => text.includes(w)) || (whole && compact(text).includes(whole))) out.push(c);
     }
     if (!d.companies.pageInfo.hasNextPage) break;
     after = d.companies.pageInfo.endCursor;
