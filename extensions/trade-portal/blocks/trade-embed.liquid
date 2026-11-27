@@ -53,7 +53,7 @@
       "id": "price_selector",
       "label": "Theme price elements to hide (CSS selector)",
       "info": "Change this if your theme still shows retail prices to trade buyers.",
-      "default": ".price, product-price, .product__price, .product-price, [data-product-price]"
+      "default": ".price, .price__current, .price__was, .price__compare, product-price, .product__price, .product-price, [data-product-price]"
     },
     { "type": "checkbox", "id": "hide_cart_prices", "label": "Hide the theme's cart prices and totals for trade buyers", "default": true },
     {
@@ -61,7 +61,7 @@
       "id": "cart_price_selector",
       "label": "Theme cart price elements to hide (CSS selector)",
       "info": "The Trade order block shows the trade prices and totals. Change this if the theme's cart still shows prices.",
-      "default": ".cart-item__price-wrapper, .cart-item__totals, .cart-item__price, .cart-items__price, .totals, .cart__subtotal, .cart-subtotal, .cart__total, cart-totals, .line-item__price, [data-cart-subtotal], [data-cart-item-price]"
+      "default": ".price__current, .price__was, .price__compare, .cart-item__price-wrapper, .cart-item__totals, .cart-item__price, .cart-items__price, .totals, .cart__subtotal, .cart-subtotal, .cart__total, cart-totals, .line-item__price, [data-cart-subtotal], [data-cart-item-price]"
     }
   ]
 }
