@@ -179,7 +179,16 @@ export default function Budgets() {
   return (
     <s-page heading="Site budgets">
       <s-section heading="Find a company">
-        <Form method="get">
+        {/* Enter in the field searches (the Polaris field doesn't submit the form by itself). */}
+        <Form
+          method="get"
+          onKeyDown={(e) => {
+            if (e.key === "Enter") {
+              e.preventDefault();
+              e.currentTarget.requestSubmit();
+            }
+          }}
+        >
           <s-stack direction="inline" gap="base">
             <s-text-field label="Company name or Unleashed code (any part, any case)" name="q" value={data.q} />
             <s-button type="submit">Search</s-button>
