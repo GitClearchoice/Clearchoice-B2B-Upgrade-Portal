@@ -25,19 +25,26 @@ function Safe() {
   return <Root />;
 }
 
-// Two views on one page: Site budgets and Site managers. The "Site Managers" menu item links here with
-// ?view=managers (a second full-page extension wouldn't load on Shopify).
-function initialView() {
+// Two views on one page: Site budgets and Site managers. The "Site Managers" menu item links to this
+// page's sub-path /managers (Shopify drops query strings on page links; a second full-page extension
+// wouldn't load).
+function currentUrl() {
   try {
-    const url = (shopify.navigation && shopify.navigation.currentEntry && shopify.navigation.currentEntry.url) || '';
-    return /view=managers|\/managers\b/.test(url) ? 'managers' : 'budgets';
+    return (shopify.navigation && shopify.navigation.currentEntry && shopify.navigation.currentEntry.url) || '';
   } catch (e) {
-    return 'budgets';
+    return '';
   }
 }
+const viewFor = (url) => (/managers/i.test(url) ? 'managers' : 'budgets');
 
 function Root() {
-  const [view, setView] = useState(initialView);
+  const [view, setView] = useState(() => viewFor(currentUrl()));
+  useEffect(() => {
+    if (!shopify.navigation || !shopify.navigation.addEventListener) return undefined;
+    const onChange = () => setView(viewFor(currentUrl()));
+    shopify.navigation.addEventListener('currententrychange', onChange);
+    return () => shopify.navigation.removeEventListener('currententrychange', onChange);
+  }, []);
   const tabs = (
     <s-stack direction="inline" gap="base">
       <s-button variant={view === 'budgets' ? 'primary' : 'secondary'} onClick={() => setView('budgets')}>Site budgets</s-button>
