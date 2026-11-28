@@ -15,6 +15,8 @@ import type { EmailSender } from "../email/postmark.ts";
 import {
   approvalRequestEmail,
   awaitingApprovalEmail,
+  needsPo,
+  newTradeOrderEmail,
   orderReceivedEmail,
   unleashedFailedEmail,
   type Email,
@@ -469,6 +471,13 @@ export async function sendToUnleashed(deps: OrderDeps, rec: TradeOrderRecord, op
     await deps.orders.update(rec.id, patch);
     await tagDraft(deps, rec.draftOrderId, ["sent-to-unleashed", ...(orderNumber ? [`unleashed-${orderNumber}`] : [])]);
     log(`Sent ${rec.draftOrderName} to Unleashed as ${orderNumber || "(no number returned)"}`);
+    // Tell Clearchoice staff about orders that are ready to process: with a real PO (not "PO REQUIRED"),
+    // either within budget or approved. Sent once, when the order first reaches Unleashed.
+    const staff = deps.notify?.staffEmail;
+    if (staff && !needsPo(rec.poNumber)) {
+      const approval = rec.approverName && rec.decidedAt ? { approverName: rec.approverName, changes: rec.decisionNote } : null;
+      await sendEmail(deps, staff, newTradeOrderEmail(summaryOf({ ...rec, ...patch }), approval), "new-trade-order");
+    }
     return { ...rec, ...patch };
   } catch (e) {
     const msg = (e as Error).message.slice(0, 2000);

@@ -185,8 +185,10 @@ test("within budget: sent to Unleashed, buyer gets 'order received'", async () =
   assert.equal(rec.budgetExGst, 100);
   assert.equal(rec.committedBeforeExGst, 0);
   assert.equal(rec.lines[0]!.title, "Nitrile gloves");
-  assert.deepEqual(emails.map((e) => [e.to, e.tag]), [["pat@example.com", "order-received"]]);
-  assert.match(emails[0]!.subject, /Order received: PO PO-1 for Westpoint Blacktown/);
+  // Staff hear about it (it has a PO), then the buyer gets their confirmation.
+  assert.deepEqual(emails.map((e) => [e.to, e.tag]), [["orders@clearchoice.example", "new-trade-order"], ["pat@example.com", "order-received"]]);
+  assert.match(emails[0]!.subject, /New trade order SO-1: Assetlink – Westpoint Blacktown – PO PO-1/);
+  assert.match(emails[1]!.subject, /Order received: PO PO-1 for Westpoint Blacktown/);
 });
 
 test("over budget: held for the head-office admin; nothing sent; emails to admin and buyer", async () => {
@@ -233,7 +235,8 @@ test("approve: sends the saved order once, retags the draft, emails the buyer; s
   assert.equal(posts[0].Guid, r.orderId);
   assert.ok(tags.remove.includes("awaiting-approval"));
   assert.ok(tags.add.includes("approved") && tags.add.includes("sent-to-unleashed"));
-  assert.deepEqual(emails.map((e) => e.tag), ["order-approved"]);
+  assert.deepEqual(emails.map((e) => e.tag), ["new-trade-order", "order-approved"]);
+  assert.match(emails[0]!.text, /Over budget: approved by Hannah Head/);
   assert.ok(repo.rows.get(r.orderId)!.decidedAt);
 
   const again = await decideOrder(deps(), r.orderId, "reject");
@@ -323,8 +326,10 @@ test("approver adds the PO and changes quantities: re-priced, draft updated, sen
   const rec = repo.rows.get(r.orderId)!;
   assert.equal(rec.goodsExGst, 16);
   assert.match(rec.decisionNote!, /Changed by approver: PO number added/);
-  assert.match(emails[0]!.subject, /Approved with changes: PO 4500123/);
-  assert.match(emails[0]!.text, /quantity 5 → 2/);
+  assert.match(emails[0]!.subject, /New trade order SO-1: .* PO 4500123/);
+  assert.match(emails[0]!.text, /approved by Hannah Head\. Changed by approver: PO number added/);
+  assert.match(emails[1]!.subject, /Approved with changes: PO 4500123/);
+  assert.match(emails[1]!.text, /quantity 5 → 2/);
 });
 
 test("approval email flags a missing PO", async () => {
@@ -345,4 +350,14 @@ test("update without approving keeps it waiting; removing every item is refused"
   await assert.rejects(reviseOrder(deps(), repo.rows.get(r.orderId)!, { quantities: { 0: 0 } }), /decline the order instead/);
   const same = await reviseOrder(deps(), repo.rows.get(r.orderId)!, { quantities: { 0: 3 }, poNumber: "" });
   assert.deepEqual(same.changes, []);
+});
+
+test("staff aren't told about orders still waiting for a PO, or not yet approved", async () => {
+  const r = await order(1, { poNumber: "PO REQUIRED - William Smith" }); // no budget: sent straight away
+  assert.equal(r.status, "sent");
+  assert.deepEqual(emails.map((e) => e.tag), ["order-received"]);
+  budgets.budgets.set(`${SITE}|default`, 1);
+  emails = [];
+  await order(5); // over budget, has a PO: waiting for approval
+  assert.ok(!emails.some((e) => e.tag === "new-trade-order"));
 });

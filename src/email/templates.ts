@@ -170,3 +170,16 @@ export function siteClosedEmail(p: { companyName: string; siteName: string; cust
     text: `${intro}\n${p.reason ? `\nTheir note: ${p.reason}\n` : ""}\nIf this was a mistake, reopen the site from the app's Site budgets page (Show closed sites).`,
   };
 }
+
+/** To Clearchoice staff when a trade order with a PO reaches Unleashed (directly, or once approved). */
+export function newTradeOrderEmail(o: OrderSummary, approval: { approverName: string; changes: string | null } | null): Email {
+  const so = o.unleashedOrderNumber ? `${o.unleashedOrderNumber}: ` : "";
+  const subject = `New trade order ${so}${o.companyName} – ${o.siteName} – PO ${o.poNumber}`;
+  const intro = `A trade order has arrived in Unleashed${o.unleashedOrderNumber ? ` as ${o.unleashedOrderNumber}` : ""} (Parked).`;
+  const approvedLine = approval ? `Over budget: approved by ${approval.approverName}.${approval.changes ? ` ${approval.changes}` : ""}` : "";
+  return {
+    subject,
+    html: layout("New trade order", `<p>${esc(intro)}</p>${approvedLine ? `<p style="background:#fff8e1;border-left:4px solid #f0b400;padding:10px 12px;font-size:14px">${esc(approvedLine)}</p>` : ""}${detailsHtml(o)}${linesHtml(o)}`),
+    text: `${intro}${approvedLine ? `\n\n${approvedLine}` : ""}\n\n${detailsText(o)}\n\n${linesText(o)}`,
+  };
+}
