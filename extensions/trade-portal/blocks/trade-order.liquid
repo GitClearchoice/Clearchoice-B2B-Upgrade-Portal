@@ -77,6 +77,12 @@
       Not a <form>: themes often wrap the cart page in their own cart <form>, and a nested form
       is dropped by the browser (and a submit button would send the theme's form to checkout).
     {%- endcomment -%}
+    {%- comment -%} Quote for the buyer's approval / purchasing system (e.g. ApprovalMax Capture), valid 30 days. {%- endcomment -%}
+    <div class="cc-trade-order__quote" data-cc-quote>
+      <span class="cc-trade-order__quote-label">Need a quote for your purchase order?</span>
+      <button type="button" class="cc-trade-order__quote-btn" data-cc-quote-format="pdf">Download quote (PDF)</button>
+      <button type="button" class="cc-trade-order__quote-btn" data-cc-quote-format="csv">Quote lines (CSV)</button>
+    </div>
     <div class="cc-trade-order__form" data-cc-form>
       {%- comment -%} Only the head-office admin can change this (shown once the app confirms who they are). {%- endcomment -%}
       <label class="cc-trade-order__no-po cc-trade-order__company-no-po" data-cc-company-no-po-wrap hidden>

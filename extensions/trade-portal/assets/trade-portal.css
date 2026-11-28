@@ -77,3 +77,7 @@ a.cc-site-picker__item:hover, a.cc-site-picker__item:focus { background: rgba(0,
 .cc-card-price .cc-qty-breaks { font-weight: 400; margin-top: .2rem; }
 .cc-trade-order__company-no-po small { opacity: .7; }
 .cc-trade-order__form label.cc-trade-order__no-po[hidden] { display: none; }
+.cc-trade-order__quote { display: flex; flex-wrap: wrap; align-items: center; gap: .5rem .75rem; max-width: 40rem; margin: 0 0 1rem; }
+.cc-trade-order__quote-label { font-size: .95em; opacity: .85; flex-basis: 100%; }
+.cc-trade-order .cc-trade-order__quote-btn { padding: .5rem 1rem; font: inherit; font-size: .9em; font-weight: 600; color: inherit; background: transparent; border: 1px solid currentColor; border-radius: 6px; cursor: pointer; }
+.cc-trade-order .cc-trade-order__quote-btn:disabled { opacity: .6; cursor: wait; }

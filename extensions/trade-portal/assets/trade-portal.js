@@ -372,6 +372,46 @@
         (noSku.length || (body.errors && body.errors.length) ? "<p class='cc-trade-order__line-error'>Remove the items marked above to place your order.</p>" : "");
     }
 
+    // "Download quote": the app prices the cart for this site and sends back a PDF or CSV (valid 30 days).
+    el.querySelectorAll("[data-cc-quote-format]").forEach(function (btn) {
+      btn.addEventListener("click", function (e) {
+        e.preventDefault();
+        if (!cartItems.length) return showError("Your cart is empty.");
+        var format = btn.getAttribute("data-cc-quote-format");
+        var label = btn.textContent;
+        btn.disabled = true;
+        btn.textContent = "Preparing…";
+        showError("");
+        fetch(proxy + "/quote", {
+          method: "POST",
+          credentials: "same-origin",
+          headers: { "Content-Type": "application/json", Accept: format === "csv" ? "text/csv" : "application/pdf" },
+          body: JSON.stringify({
+            location: location,
+            format: format,
+            lines: cartItems.map(function (i) { return { variantId: String(i.variant_id), quantity: i.quantity }; }),
+          }),
+        })
+          .then(function (r) {
+            var type = r.headers.get("content-type") || "";
+            if (!r.ok || type.indexOf("json") !== -1) {
+              return r.json().catch(function () { return {}; }).then(function (b) { throw new Error(b.error || "The quote couldn't be made."); });
+            }
+            var name = ((r.headers.get("content-disposition") || "").match(/filename="([^"]+)"/) || [])[1] || ("Clearchoice-quote." + format);
+            return r.blob().then(function (blob) {
+              var a = document.createElement("a");
+              a.href = URL.createObjectURL(blob);
+              a.download = name;
+              document.body.appendChild(a);
+              a.click();
+              setTimeout(function () { URL.revokeObjectURL(a.href); a.remove(); }, 1000);
+            });
+          })
+          .catch(function (err) { showError(err.message); })
+          .finally(function () { btn.disabled = false; btn.textContent = label; });
+      });
+    });
+
     // Enter in the PO field places the order (and must not submit the theme's cart form).
     poEl.addEventListener("keydown", function (e) {
       if (e.key === "Enter") { e.preventDefault(); submit(); }
