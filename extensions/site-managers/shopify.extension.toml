@@ -11,7 +11,7 @@ handle = "site-managers"
 type = "ui_extension"
 
   [[extensions.targeting]]
-  module = "./src/SiteManagers.jsx"
+  module = "./src/Test.jsx" # TEMPORARY diagnostic; back to ./src/SiteManagers.jsx after the test
   target = "customer-account.page.render"
 
   [extensions.capabilities]
