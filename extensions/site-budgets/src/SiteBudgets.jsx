@@ -1,5 +1,5 @@
 import '@shopify/ui-extensions/preact';
-import { render } from 'preact';
+import { Fragment, render } from 'preact';
 import { useEffect, useErrorBoundary, useState } from 'preact/hooks';
 import { SiteManagers } from './Managers.jsx';
 
@@ -259,13 +259,22 @@ function Site({ site, data, onSaved, onError }) {
               <>
                 <s-text>{data.thisMonth.label}: {money(now.ordered)} of {money(now.budget)} ordered</s-text>
                 <s-progress value={Math.min(now.ordered, now.budget)} max={now.budget || 1} tone={over ? 'critical' : 'auto'} accessibilityLabel="Budget used this month" />
-                <s-text color="subdued">{over ? `Over by ${money(now.ordered - now.budget)}` : `${money(now.budget - now.ordered)} left`}{now.awaiting ? ` · ${money(now.awaiting)} waiting for approval` : ''}</s-text>
+                <s-paragraph>
+                  <s-text type="strong" tone="critical">{over ? `Over by ${money(now.ordered - now.budget)}` : `${money(now.budget - now.ordered)} left`}</s-text>
+                  {now.awaiting ? <s-text color="subdued">{` · ${money(now.awaiting)} waiting for approval`}</s-text> : null}
+                </s-paragraph>
               </>
             )}
-            <s-text color="subdued">
-              Every month: {site.default == null ? 'not set' : money(site.default)}
-              {data.quarter.months.map((m, i) => ` · ${m.label}: ${site.effective[i] == null ? '–' : money(site.effective[i])}`).join('')}
-            </s-text>
+            {/* Labels in bold, amounts in the normal (black) text colour. */}
+            <s-paragraph>
+              <s-text type="strong">Every month:</s-text> <s-text color="base">{site.default == null ? 'not set' : money(site.default)}</s-text>
+              {data.quarter.months.map((m, i) => (
+                <Fragment key={m.key}>
+                  {' · '}
+                  <s-text type="strong">{m.label}:</s-text> <s-text color="base">{site.effective[i] == null ? '–' : money(site.effective[i])}</s-text>
+                </Fragment>
+              ))}
+            </s-paragraph>
           </s-stack>
           {!mode ? (
             <s-stack direction="block" gap="small-200" alignItems="end">
