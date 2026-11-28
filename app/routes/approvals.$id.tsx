@@ -65,6 +65,10 @@ export const action = async ({ params, request }: ActionFunctionArgs) => {
     if (raw !== null && String(raw).trim() !== "") rev.quantities![i] = Number(String(raw).trim());
   });
 
+  // A buyer without a PO asked for it to be provided: the approver must enter it before approving.
+  if (intent === "approve" && needsPo(r.order.poNumber) && !String(form.get("poNumber") ?? "").trim()) {
+    return { error: "Please provide the PO number before approving." };
+  }
   const { admin } = await unauthenticated.admin(r.order.shop);
   const deps = orderDeps(graphqlFor(admin));
   try {
@@ -142,13 +146,15 @@ export default function Approval() {
           <Form method="post" key={o.lines.map((l) => `${l.variantId}:${l.quantity}`).join(",") + "|" + o.poNumber}>
             <input type="hidden" name="t" value={data.token} />
 
+            <style>{`.cc-po-needed{border:2px solid ${RED} !important}.cc-po-needed::placeholder{color:${RED};opacity:1;font-weight:700}`}</style>
             <label style={{ display: "block", margin: "16px 0 8px", fontSize: 15, fontWeight: 600 }}>
               Purchase order number
-              {o.needsPo && <span style={{ display: "block", fontWeight: 400, fontSize: 14, color: "#8a5a00", marginTop: 4 }}>The buyer doesn't have a PO number yet ({o.poNumber}). Enter it here if you have it.</span>}
+              {o.needsPo && <span style={{ display: "block", fontWeight: 400, fontSize: 14, color: "#555", marginTop: 4 }}>The buyer doesn't have a PO number yet.</span>}
               <input
                 name="poNumber"
                 defaultValue={o.needsPo ? "" : o.poNumber}
-                placeholder={o.needsPo ? "Enter the PO number" : ""}
+                placeholder={o.needsPo ? "PROVIDE PO BEFORE APPROVING" : ""}
+                className={o.needsPo ? "cc-po-needed" : undefined}
                 maxLength={100}
                 style={{ display: "block", width: "100%", marginTop: 6, padding: 10, font: "inherit", boxSizing: "border-box", border: "1px solid #999", borderRadius: 6 }}
               />

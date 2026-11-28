@@ -113,7 +113,7 @@ export function awaitingApprovalEmail(o: OrderSummary, approverName: string): Em
 export function approvalRequestEmail(o: OrderSummary, b: BudgetLine, approverName: string, links: { review: string }): Email {
   const subject = `Approval needed: ${o.siteName} order over budget (PO ${o.poNumber})`;
   const intro = `Hi ${approverName}, ${o.buyerName} has placed an order for ${o.siteName} that would take the site over its monthly budget. Please review it: you can change quantities or remove items, then approve or decline.`;
-  const poNote = needsPo(o.poNumber) ? `The buyer doesn't have a PO number yet. You can enter one on the review page when you approve.` : "";
+  const poNote = needsPo(o.poNumber) ? `The buyer doesn't have a PO number yet. Please provide the PO number on the review page before approving.` : "";
   const button = `<p style="margin:20px 0"><a href="${esc(links.review)}" style="display:inline-block;background:${BRAND};color:#fff;font-weight:bold;font-size:16px;text-decoration:none;padding:12px 24px;border-radius:6px">Review order</a></p>`;
   return {
     subject,
@@ -135,8 +135,8 @@ export function approvedEmail(o: OrderSummary, approverName: string, changes: st
   };
 }
 
-/** True when the buyer had no PO and asked for it to be requested ("PO REQUIRED - <name>"). */
-export const needsPo = (po: string) => /^PO REQUIRED\b/i.test(po.trim());
+/** True when the buyer had no PO ("PO REQUIRED - <name>"; earlier orders used "PO TO FOLLOW - <name>"). */
+export const needsPo = (po: string) => /^PO (REQUIRED|TO FOLLOW)\b/i.test(po.trim());
 
 export function rejectedEmail(o: OrderSummary, approverName: string, reason: string | null): Email {
   const subject = `Declined: PO ${o.poNumber} for ${o.siteName}`;
