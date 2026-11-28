@@ -210,6 +210,9 @@ export const action = async ({ request }: ActionFunctionArgs) => {
   const ms = [...quarter.months];
   const { sites } = await companySites(admin, companyId);
   const allDefault = String(form.get("allDefault") ?? "").trim();
+  // When the site search is in use, "set every month" applies only to the sites shown.
+  const allDefaultScope = String(form.get("allDefaultSites") ?? "");
+  const allDefaultFor = allDefaultScope ? new Set(allDefaultScope.split(",").filter(Boolean)) : null;
 
   const parse = (raw: string): number | null | "bad" => {
     const t = raw.replace(/[$,\s]/g, "");
@@ -223,7 +226,7 @@ export const action = async ({ request }: ActionFunctionArgs) => {
     const fields: [string, string][] = [["default", "default"], ...ms.map((m, i): [string, string] => [`m${i}`, m])];
     for (const [field, month] of fields) {
       let raw = form.get(`${field}:${site.id}`);
-      if (field === "default" && allDefault) raw = allDefault;
+      if (field === "default" && allDefault && (!allDefaultFor || allDefaultFor.has(site.id))) raw = allDefault;
       if (raw === null) continue; // not on the form
       const v = parse(String(raw));
       if (v === "bad") { bad.push(`${site.name} (${field === "default" ? "every month" : monthLabel(month)})`); continue; }
@@ -348,7 +351,14 @@ export default function Budgets() {
             <input type="hidden" name="company" value={data.company.id} />
             <input type="hidden" name="quarter" value={data.quarter?.key ?? ""} />
             <s-stack direction="block" gap="base">
-              <s-text-field label="Set 'every month' for all sites (optional)" name="allDefault" placeholder="e.g. 2000" />
+              <s-text-field
+                label={siteFilter ? `Set 'every month' for the ${matchCount} site${matchCount === 1 ? "" : "s"} shown (optional)` : "Set 'every month' for all sites (optional)"}
+                name="allDefault"
+                placeholder="e.g. 2000"
+              />
+              {siteFilter && (
+                <input type="hidden" name="allDefaultSites" value={data.company.sites.filter((x) => shown(x.name)).map((x) => x.id).join(",") || "none"} />
+              )}
               <div style={{ display: "flex", alignItems: "center", gap: 12, flexWrap: "wrap" }}>
                 <input
                   type="search"
