@@ -249,20 +249,33 @@ function Site({ site, data, onSaved, onError }) {
   return (
     <s-box padding="base" border="base" borderRadius="base">
       <s-stack direction="block" gap="small-200">
-        <s-text type="strong">{site.name}</s-text>
-        {now.budget == null ? (
-          <s-text color="subdued">{data.thisMonth.label}: no budget set · {money(now.ordered)} ordered</s-text>
-        ) : (
-          <>
-            <s-text>{data.thisMonth.label}: {money(now.ordered)} of {money(now.budget)} ordered</s-text>
-            <s-progress value={Math.min(now.ordered, now.budget)} max={now.budget || 1} tone={over ? 'critical' : 'auto'} accessibilityLabel="Budget used this month" />
-            <s-text color="subdued">{over ? `Over by ${money(now.ordered - now.budget)}` : `${money(now.budget - now.ordered)} left`}{now.awaiting ? ` · ${money(now.awaiting)} waiting for approval` : ''}</s-text>
-          </>
-        )}
-        <s-text color="subdued">
-          Every month: {site.default == null ? 'not set' : money(site.default)}
-          {data.quarter.months.map((m, i) => ` · ${m.label}: ${site.effective[i] == null ? '–' : money(site.effective[i])}`).join('')}
-        </s-text>
+        {/* Site details on the left; the two actions as small links on the right, lined up with the bottom lines. */}
+        <s-grid gridTemplateColumns="1fr auto" gap="base" alignItems="end">
+          <s-stack direction="block" gap="small-200">
+            <s-text type="strong">{site.name}</s-text>
+            {now.budget == null ? (
+              <s-text color="subdued">{data.thisMonth.label}: no budget set · {money(now.ordered)} ordered</s-text>
+            ) : (
+              <>
+                <s-text>{data.thisMonth.label}: {money(now.ordered)} of {money(now.budget)} ordered</s-text>
+                <s-progress value={Math.min(now.ordered, now.budget)} max={now.budget || 1} tone={over ? 'critical' : 'auto'} accessibilityLabel="Budget used this month" />
+                <s-text color="subdued">{over ? `Over by ${money(now.ordered - now.budget)}` : `${money(now.budget - now.ordered)} left`}{now.awaiting ? ` · ${money(now.awaiting)} waiting for approval` : ''}</s-text>
+              </>
+            )}
+            <s-text color="subdued">
+              Every month: {site.default == null ? 'not set' : money(site.default)}
+              {data.quarter.months.map((m, i) => ` · ${m.label}: ${site.effective[i] == null ? '–' : money(site.effective[i])}`).join('')}
+            </s-text>
+          </s-stack>
+          {!mode ? (
+            <s-stack direction="block" gap="small-200" alignItems="end">
+              <s-link onClick={startEdit}>Edit budgets</s-link>
+              <s-link onClick={() => setMode('close')}>We no longer use this site</s-link>
+            </s-stack>
+          ) : (
+            <s-text />
+          )}
+        </s-grid>
 
         {mode === 'edit' && (
           <s-stack direction="block" gap="base">
@@ -288,12 +301,6 @@ function Site({ site, data, onSaved, onError }) {
           </s-stack>
         )}
 
-        {!mode && (
-          <s-stack direction="inline" gap="base">
-            <s-button variant="secondary" onClick={startEdit}>Edit budgets</s-button>
-            <s-button variant="secondary" tone="critical" onClick={() => setMode('close')}>We no longer use this site</s-button>
-          </s-stack>
-        )}
       </s-stack>
     </s-box>
   );
