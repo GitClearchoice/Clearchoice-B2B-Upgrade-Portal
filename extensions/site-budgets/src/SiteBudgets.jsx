@@ -104,12 +104,15 @@ function Approvals({ items }) {
       <s-stack direction="block" gap="base">
         {items.map((a) => (
           <s-box key={a.id} padding="base" border="base" borderRadius="base">
-            <s-stack direction="block" gap="small-200">
-              <s-text type="strong">{a.site}</s-text>
-              <s-text color="subdued">{a.buyer} · {date(a.placed)} · PO {a.po}</s-text>
-              <s-text>{money(a.goodsExGst)} ex GST</s-text>
-              {a.reviewUrl && <s-button href={a.reviewUrl} target="_blank" variant="primary">Review order</s-button>}
-            </s-stack>
+            {/* Details on the left, the Review order button on the right, centred against the three lines. */}
+            <s-grid gridTemplateColumns="1fr auto" gap="base" alignItems="center">
+              <s-stack direction="block" gap="small-200">
+                <s-text type="strong">{a.site}</s-text>
+                <s-text color="subdued">{a.buyer} · {date(a.placed)} · PO {a.po}</s-text>
+                <s-text>{money(a.goodsExGst)} ex GST</s-text>
+              </s-stack>
+              {a.reviewUrl ? <s-button href={a.reviewUrl} target="_blank" variant="primary">Review order</s-button> : <s-text />}
+            </s-grid>
           </s-box>
         ))}
       </s-stack>
