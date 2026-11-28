@@ -185,9 +185,16 @@ function PersonForm({ mode, person, sites, onCancel, onDone, onError }) {
         </s-select>
         <s-text type="strong">Sites ({chosen.size} chosen)</s-text>
         {sites.length > 8 && <s-text-field label="Search sites" value={search} onInput={(e) => setSearch(e.currentTarget.value)} />}
-        <s-stack direction="inline" gap="base">
-          <s-button variant="secondary" onClick={() => selectShown(true)}>Select all shown</s-button>
-          <s-button variant="secondary" onClick={() => selectShown(false)}>Clear shown</s-button>
+        {/* Select all / Clear, then (after a gap) Save and Cancel, so they're reachable above a long site list. */}
+        <s-stack direction="inline" gap="large" alignItems="center">
+          <s-stack direction="inline" gap="base">
+            <s-button variant="secondary" onClick={() => selectShown(true)}>Select all shown</s-button>
+            <s-button variant="secondary" onClick={() => selectShown(false)}>Clear shown</s-button>
+          </s-stack>
+          <s-stack direction="inline" gap="base">
+            <s-button variant="primary" loading={busy} onClick={save}>{mode === 'add' ? 'Add and email them' : 'Save changes'}</s-button>
+            <s-button variant="secondary" disabled={busy} onClick={onCancel}>Cancel</s-button>
+          </s-stack>
         </s-stack>
         <s-stack direction="block" gap="small-200">
           {matches.slice(0, SHOW_SITES).map((s) => (
@@ -195,10 +202,6 @@ function PersonForm({ mode, person, sites, onCancel, onDone, onError }) {
           ))}
           {matches.length > SHOW_SITES && <s-text color="subdued">Showing {SHOW_SITES} of {matches.length}. Search to find others.</s-text>}
           {!matches.length && <s-text color="subdued">No sites match your search.</s-text>}
-        </s-stack>
-        <s-stack direction="inline" gap="base">
-          <s-button variant="primary" loading={busy} onClick={save}>{mode === 'add' ? 'Add and email them' : 'Save changes'}</s-button>
-          <s-button variant="secondary" disabled={busy} onClick={onCancel}>Cancel</s-button>
         </s-stack>
       </s-stack>
     </s-box>
