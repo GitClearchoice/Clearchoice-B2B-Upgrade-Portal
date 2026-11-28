@@ -43,6 +43,8 @@ export interface ViewParams {
   quarter?: string | null;
   fy?: string | null;
   site?: string | null; // year summary + order history filter
+  /** Year report export: also work out each site's totals for the year. */
+  perSite?: boolean;
 }
 
 export async function budgetsView(shop: string, shopify: ShopifyGraphql, companyId: string, p: ViewParams) {
@@ -144,6 +146,20 @@ export async function budgetsView(shop: string, shopify: ShopifyGraphql, company
         site: siteFilter,
         months: monthsOut,
         totals: { budget: round(monthsOut.reduce((t, m) => t + m.budget, 0)), ordered: round(monthsOut.reduce((t, m) => t + m.ordered, 0)) },
+        perSite: p.perSite
+          ? list.map((st) => {
+              let budget = 0;
+              let unbudgeted = 0;
+              let ordered = 0;
+              for (const m of fy.months) {
+                const b = effective(st.locationId, m);
+                if (b == null) unbudgeted++;
+                else budget += b;
+                ordered += spent(st.locationId, m).committed;
+              }
+              return { name: st.name, budget: round(budget), ordered: round(ordered), monthsWithoutBudget: unbudgeted };
+            })
+          : undefined,
       };
     })(),
     orders: orders
@@ -162,6 +178,7 @@ export async function budgetsView(shop: string, shopify: ShopifyGraphql, company
       })),
     exportUrl: appUrl && secret ? exportUrl(appUrl, secret, { kind: "orders", shop, company: companyId, fy: fy.key, site: siteFilter ?? "" }) : null,
     budgetsExportUrl: appUrl && secret ? exportUrl(appUrl, secret, { kind: "budgets", shop, company: companyId, quarter: quarter.key }) : null,
+    yearExportUrl: appUrl && secret ? exportUrl(appUrl, secret, { kind: "year", shop, company: companyId, fy: fy.key, site: siteFilter ?? "" }) : null,
   };
 }
 
@@ -274,4 +291,35 @@ export async function exportCsv(shop: string, companyId: string, fyKey: string, 
   });
   const company = orders[0]?.companyName?.replace(/[^A-Za-z0-9]+/g, "-") || "orders";
   return { filename: `${company}-${fy.key}${site ? "-site" : ""}.csv`, csv: "﻿" + [header.join(","), ...lines].join("\r\n") };
+}
+
+/** Year summary report: month-by-month budget vs ordered, then each site's totals for the year. */
+export async function exportYearCsv(shop: string, shopify: ShopifyGraphql, companyId: string, fyKey: string | null, site: string | null) {
+  const v = await budgetsView(shop, shopify, companyId, { fy: fyKey, site, perSite: true });
+  const y = v.year;
+  const cell = (x: unknown) => {
+    const t = String(x ?? "");
+    return /[",\n]/.test(t) ? `"${t.replace(/"/g, '""')}"` : t;
+  };
+  const row = (...xs: unknown[]) => xs.map(cell).join(",");
+  const amt = (n: number) => n.toFixed(2);
+  const siteName = site ? v.sites.find((s) => s.id === site)?.name ?? "" : "All sites";
+  const lines = [
+    row(`Year summary ${y.label}`, siteName),
+    row("Goods ex GST. Budget counts sites that have one; ordered counts orders sent to Clearchoice (incl. approved)."),
+    "",
+    row("Month", "Budget", "Ordered", "Remaining", "Over by", "Sites without a budget"),
+    ...y.months.map((m) => {
+      const diff = m.budget - m.ordered;
+      return row(m.label, amt(m.budget), amt(m.ordered), m.budget && diff >= 0 ? amt(diff) : "", m.budget && diff < 0 ? amt(-diff) : "", m.unbudgeted);
+    }),
+    row("Total", amt(y.totals.budget), amt(y.totals.ordered), y.totals.budget >= y.totals.ordered ? amt(y.totals.budget - y.totals.ordered) : "", y.totals.budget < y.totals.ordered ? amt(y.totals.ordered - y.totals.budget) : ""),
+    "",
+    row("Site", "Budget for the year", "Ordered", "Remaining", "Over by", "Months without a budget"),
+    ...(y.perSite ?? []).map((st) => {
+      const diff = st.budget - st.ordered;
+      return row(st.name, amt(st.budget), amt(st.ordered), st.budget && diff >= 0 ? amt(diff) : "", st.budget && diff < 0 ? amt(-diff) : "", st.monthsWithoutBudget);
+    }),
+  ];
+  return { filename: `year-summary-${y.key}${site ? "-site" : ""}.csv`, csv: "\uFEFF" + lines.join("\r\n") };
 }

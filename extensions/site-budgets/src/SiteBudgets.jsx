@@ -364,7 +364,10 @@ function Year({ data, loading, onFy, onSite }) {
           <s-button variant="secondary" disabled={loading} onClick={() => onFy(y.prev)}>‹ Previous year</s-button>
           <s-button variant="secondary" disabled={loading} onClick={() => onFy(y.next)}>Next year ›</s-button>
         </s-stack>
-        <SiteSelect data={data} onSite={onSite} />
+        <s-grid gridTemplateColumns="1fr auto" gap="base" alignItems="end">
+          <SiteSelect data={data} onSite={onSite} />
+          {data.yearExportUrl ? <s-button href={data.yearExportUrl} target="_blank" variant="secondary">Export report</s-button> : <s-text />}
+        </s-grid>
         <s-grid gridTemplateColumns="1fr auto auto" gap="small-200">
           <s-text type="strong">Month</s-text>
           <s-text type="strong">Budget</s-text>
