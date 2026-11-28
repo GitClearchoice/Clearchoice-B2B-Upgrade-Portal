@@ -1,4 +1,5 @@
 import type { ActionFunctionArgs, HeadersFunction, LoaderFunctionArgs } from "react-router";
+import { useState } from "react";
 import { Form, useActionData, useLoaderData, useNavigation, useSearchParams } from "react-router";
 import { boundary } from "@shopify/shopify-app-react-router/server";
 import { authenticate } from "../shopify.server";
@@ -265,6 +266,12 @@ export default function Budgets() {
   const result = useActionData<typeof action>();
   const busy = useNavigation().state !== "idle";
   const [params] = useSearchParams();
+  // Site search: hides non-matching rows (they stay in the form, so saving keeps their amounts).
+  const [siteFilter, setSiteFilter] = useState("");
+  const words = siteFilter.toLowerCase().split(/\s+/).filter(Boolean);
+  const shown = (name: string) => words.every((w) => name.toLowerCase().includes(w));
+  const hide = (name: string): React.CSSProperties | undefined => (shown(name) ? undefined : { display: "none" });
+  const matchCount = data.company ? data.company.sites.filter((x) => shown(x.name)).length : 0;
 
   return (
     <s-page heading="Site budgets">
@@ -342,6 +349,18 @@ export default function Budgets() {
             <input type="hidden" name="quarter" value={data.quarter?.key ?? ""} />
             <s-stack direction="block" gap="base">
               <s-text-field label="Set 'every month' for all sites (optional)" name="allDefault" placeholder="e.g. 2000" />
+              <div style={{ display: "flex", alignItems: "center", gap: 12, flexWrap: "wrap" }}>
+                <input
+                  type="search"
+                  value={siteFilter}
+                  onChange={(e) => setSiteFilter(e.target.value)}
+                  onKeyDown={(e) => { if (e.key === "Enter") e.preventDefault(); }}
+                  placeholder="Search sites (any part of the name)"
+                  aria-label="Search sites"
+                  style={{ flex: "1 1 260px", maxWidth: 420, padding: "8px 12px", fontSize: 14, border: "1px solid #8a8a8a", borderRadius: 8 }}
+                />
+                {siteFilter && <s-text color="subdued">{matchCount} of {data.company.sites.length} sites</s-text>}
+              </div>
               <div style={scrollBox}>
               <table style={table}>
                 <thead>
@@ -353,7 +372,7 @@ export default function Budgets() {
                 </thead>
                 <tbody>
                   {data.company.sites.map((s) => (
-                    <tr key={s.id}>
+                    <tr key={s.id} style={hide(s.name)}>
                       <td style={td}>
                         {s.name}
                         {s.dormant && (
@@ -430,7 +449,7 @@ export default function Budgets() {
               </thead>
               <tbody>
                 {data.summary.rows.map((r) => (
-                  <tr key={r.id}>
+                  <tr key={r.id} style={hide(r.name)}>
                     <td style={td}>{r.name}</td>
                     <td style={{ ...td, textAlign: "right" }}>{r.budget == null ? "No budget" : money(r.budget)}</td>
                     <td style={{ ...td, textAlign: "right" }}>{money(r.ordered)}</td>
