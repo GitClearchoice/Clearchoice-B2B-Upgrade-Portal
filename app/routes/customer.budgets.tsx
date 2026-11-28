@@ -1,6 +1,6 @@
 import type { ActionFunctionArgs, LoaderFunctionArgs } from "react-router";
 import { customerContext, handleCustomer, json } from "../customer-auth.server";
-import { budgetsView, openSites, saveSiteBudgets } from "../customer-budgets.server";
+import { budgetsView, importBudgetsCsv, openSites, saveSiteBudgets } from "../customer-budgets.server";
 import { closeSiteForCustomer } from "../sites.server";
 
 // Backend for the customer account page "Site budgets" (extension extensions/site-budgets).
@@ -26,8 +26,17 @@ async function budgetsLoader(request: Request) {
 async function budgetsAction(request: Request) {
   const c = await customerContext(request);
   if (!c.buyer || !c.isAdmin) return c.cors(json({ error: "Only your head-office admin can change site budgets." }, 403));
-  let body: { action?: string; site?: string; values?: Record<string, number | null>; reason?: string };
+  let body: { action?: string; site?: string; values?: Record<string, number | null>; reason?: string; csv?: string };
   try { body = await request.json(); } catch { return c.cors(json({ error: "Bad request" }, 400)); }
+  if (body.action === "import") {
+    const by = `${c.buyer.name}${c.buyer.email ? ` <${c.buyer.email}>` : ""} (customer account, CSV import)`;
+    try {
+      const r = await importBudgetsCsv(c.shop, c.shopify, c.buyer.companyId, String(body.csv ?? "").slice(0, 2_000_000), by);
+      return c.cors(json({ ok: true, ...r }));
+    } catch (e) {
+      return c.cors(json({ error: (e as Error).message }, 400));
+    }
+  }
   const sites = await openSites(c.shop, c.shopify, c.buyer.companyId);
   const site = sites.find((s) => s.locationId === body.site);
   if (!site) return c.cors(json({ error: "That site couldn't be found (it may have been closed)." }, 404));

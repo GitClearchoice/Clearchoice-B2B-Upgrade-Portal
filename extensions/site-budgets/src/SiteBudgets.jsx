@@ -119,12 +119,45 @@ function Approvals({ items }) {
 
 function Quarter({ data, loading, onQuarter, onSaved, onError }) {
   const [search, setSearch] = useState('');
+  const [importing, setImporting] = useState(false);
+  const [busy, setBusy] = useState(false);
+
+  // Import: the CSV is read here and sent to the app, which checks every row before saving any.
+  async function onFile(event) {
+    const file = event.currentTarget.files && event.currentTarget.files[0];
+    if (!file) return;
+    setBusy(true);
+    try {
+      const csv = await file.text();
+      const r = await api('POST', '/customer/budgets', { action: 'import', csv });
+      setImporting(false);
+      const missing = r.unknown && r.unknown.length ? ` Not found: ${r.unknown.slice(0, 5).join(', ')}${r.unknown.length > 5 ? '…' : ''}.` : '';
+      onSaved(`Imported budgets for ${r.updated} site${r.updated === 1 ? '' : 's'}.${missing}`);
+    } catch (e) {
+      onError(e.message);
+    } finally {
+      setBusy(false);
+    }
+  }
   const [shown, setShown] = useState(PAGE_SIZE);
   const words = search.toLowerCase().split(/\s+/).filter(Boolean);
   const matches = data.sites.filter((s) => words.every((w) => s.name.toLowerCase().includes(w)));
   return (
     <s-section heading={`Budgets: ${data.quarter.label}`}>
       <s-stack direction="block" gap="base">
+        <s-stack direction="inline" gap="base" justifyContent="end">
+          {data.budgetsExportUrl && <s-button href={data.budgetsExportUrl} target="_blank" variant="secondary">Export CSV</s-button>}
+          <s-button variant="secondary" onClick={() => setImporting(!importing)}>{importing ? 'Cancel import' : 'Import CSV'}</s-button>
+        </s-stack>
+        {importing && (
+          <s-box padding="base" border="base" borderRadius="base">
+            <s-stack direction="block" gap="base">
+              <s-text>Export first and use that file as the template. Change the amounts in Excel (keep the header row and the Site ID column), save as CSV, then choose it here. Blank cells remove that budget.</s-text>
+              <s-drop-zone label="Budgets CSV" accept=".csv,text/csv" disabled={busy} onChange={onFile} />
+              {busy && <s-text color="subdued">Importing…</s-text>}
+            </s-stack>
+          </s-box>
+        )}
         <s-text color="subdued">Monthly budgets per site, goods only (ex GST and freight). Orders that would go over a site's budget come to you for approval.</s-text>
         <s-stack direction="inline" gap="base">
           <s-button variant="secondary" disabled={loading} onClick={() => onQuarter(data.quarter.prev)}>‹ Previous quarter</s-button>

@@ -18,6 +18,7 @@ import {
   sydneyMonthRange,
 } from "../src/orders/budget.ts";
 import type { ShopifyGraphql } from "../src/orders/placeOrder.ts";
+import { readBudgetCsv, writeBudgetCsv } from "../src/b2b/budgetCsv.ts";
 
 const STATUS_LABEL: Record<string, string> = {
   sent: "Sent to Clearchoice",
@@ -159,7 +160,8 @@ export async function budgetsView(shop: string, shopify: ShopifyGraphql, company
         goodsExGst: Number(o.goodsExGst.toString()),
         status: STATUS_LABEL[o.status] ?? o.status,
       })),
-    exportUrl: appUrl && secret ? exportUrl(appUrl, secret, shop, companyId, fy.key, siteFilter) : null,
+    exportUrl: appUrl && secret ? exportUrl(appUrl, secret, { kind: "orders", shop, company: companyId, fy: fy.key, site: siteFilter ?? "" }) : null,
+    budgetsExportUrl: appUrl && secret ? exportUrl(appUrl, secret, { kind: "budgets", shop, company: companyId, quarter: quarter.key }) : null,
   };
 }
 
@@ -185,25 +187,61 @@ export async function saveSiteBudgets(
   await prisma.$transaction(ops);
 }
 
-// ---------- CSV export (opened in a new tab, so it carries a signed, 15-minute link instead of a session token)
+// ---------- CSV downloads (opened in a new tab, so they carry a signed, 15-minute link instead of a session token)
 
-function sign(secret: string, parts: string[]) {
-  return createHmac("sha256", secret).update(`export:${parts.join("|")}`).digest("base64url");
+const EXPORT_KEYS = ["kind", "shop", "company", "fy", "site", "quarter", "exp"] as const;
+
+function sign(secret: string, q: URLSearchParams) {
+  return createHmac("sha256", secret).update(`export:${EXPORT_KEYS.map((k) => q.get(k) ?? "").join("|")}`).digest("base64url");
 }
 
-export function exportUrl(appUrl: string, secret: string, shop: string, companyId: string, fy: string, site: string | null) {
-  const exp = String(Math.floor(Date.now() / 1000) + 15 * 60);
-  const q = new URLSearchParams({ shop, company: companyId, fy, ...(site ? { site } : {}), exp });
-  q.set("sig", sign(secret, [shop, companyId, fy, site ?? "", exp]));
+export function exportUrl(appUrl: string, secret: string, p: Record<string, string>) {
+  const q = new URLSearchParams();
+  for (const [k, v] of Object.entries(p)) if (v) q.set(k, v);
+  q.set("exp", String(Math.floor(Date.now() / 1000) + 15 * 60));
+  q.set("sig", sign(secret, q));
   return `${appUrl}/customer/budgets/export?${q}`;
 }
 
 export function verifyExport(secret: string, q: URLSearchParams): boolean {
   const exp = Number(q.get("exp"));
-  if (!exp || exp * 1000 < Date.now()) return false;
-  const want = Buffer.from(sign(secret, [q.get("shop") ?? "", q.get("company") ?? "", q.get("fy") ?? "", q.get("site") ?? "", String(exp)]));
+  if (!secret || !exp || exp * 1000 < Date.now()) return false;
+  const want = Buffer.from(sign(secret, q));
   const got = Buffer.from(q.get("sig") ?? "");
   return want.length === got.length && timingSafeEqual(want, got);
+}
+
+/** The company's open sites with their budgets for a quarter, as the budgets CSV. */
+export async function exportBudgetsCsv(shop: string, shopify: ShopifyGraphql, companyId: string, quarterKey: string | null) {
+  const quarter = parseQuarter(quarterKey) ?? quarterOf(sydneyMonth(new Date()));
+  const sites = await openSites(shop, shopify, companyId);
+  const rows = await prisma.siteBudget.findMany({ where: { shop, companyId, month: { in: ["default", ...quarter.months] } } });
+  const val = (loc: string, m: string) => {
+    const r = rows.find((x) => x.locationId === loc && x.month === m);
+    return r ? Number(r.amountExGst.toString()) : null;
+  };
+  const csv = writeBudgetCsv(
+    quarter.months.map((m) => ({ key: m, label: shortMonthLabel(m) })),
+    sites.map((s) => ({ id: s.locationId, name: s.name, default: val(s.locationId, "default"), months: quarter.months.map((m) => val(s.locationId, m)) })),
+  );
+  return { filename: `site-budgets-${quarter.key}.csv`, csv };
+}
+
+/** Imports a budgets CSV for the company's open sites (matched by Site ID, then name). */
+export async function importBudgetsCsv(shop: string, shopify: ShopifyGraphql, companyId: string, text: string, by: string) {
+  const rows = readBudgetCsv(text); // throws on bad amounts / missing columns: nothing saved
+  const sites = await openSites(shop, shopify, companyId);
+  const byId = new Map(sites.map((x) => [x.locationId, x]));
+  const byName = new Map(sites.map((x) => [x.name.trim().toLowerCase(), x]));
+  let updated = 0;
+  const unknown: string[] = [];
+  for (const r of rows) {
+    const site = (r.siteId && byId.get(r.siteId)) || (r.site ? byName.get(r.site.toLowerCase()) : undefined);
+    if (!site) { unknown.push(r.site || r.siteId || "(no name)"); continue; }
+    await saveSiteBudgets(shop, companyId, { id: site.locationId, name: site.name }, r.values, by);
+    updated++;
+  }
+  return { updated, unknown };
 }
 
 export async function exportCsv(shop: string, companyId: string, fyKey: string, site: string | null): Promise<{ filename: string; csv: string }> {
