@@ -1,0 +1,17 @@
+# Customer account extension: "Purchase orders" setting on the company's Profile page, under
+# Payment details. Head-office admin can tick "We don't use purchase orders" (same company setting as
+# the cart tick box); other buyers see the current setting. Backend: /customer/po-setting on the app.
+api_version = "2026-01"
+
+[[extensions]]
+name = "Purchase orders"
+handle = "po-setting"
+type = "ui_extension"
+
+  [[extensions.targeting]]
+  module = "./src/PoSetting.jsx"
+  target = "customer-account.profile.company-location-payment.render-after"
+
+  [extensions.capabilities]
+  # Calls the app's own backend (https://clearchoice-b2b.onrender.com).
+  network_access = true
