@@ -21,7 +21,7 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
       ? await exportBudgetsCsv(shop, await shopify(), company, q.get("quarter"))
       : kind === "year"
         ? await exportYearCsv(shop, await shopify(), company, q.get("fy"), q.get("site"))
-        : await exportCsv(shop, company, q.get("fy")!, q.get("site"));
+        : await exportCsv(shop, await shopify(), company, q.get("fy")!, q.get("site"));
   return new Response(csv, {
     headers: { "Content-Type": "text/csv; charset=utf-8", "Content-Disposition": `attachment; filename="${filename}"`, "Cache-Control": "private, no-store" },
   });

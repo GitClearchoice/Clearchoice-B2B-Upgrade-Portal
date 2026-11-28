@@ -261,7 +261,12 @@ export async function importBudgetsCsv(shop: string, shopify: ShopifyGraphql, co
   return { updated, unknown };
 }
 
-export async function exportCsv(shop: string, companyId: string, fyKey: string, site: string | null): Promise<{ filename: string; csv: string }> {
+/**
+ * Order history report: one row per product line (better for pivot tables), with the order's details
+ * repeated on each row, the product code and description in their own columns, and the Shopify
+ * product type.
+ */
+export async function exportCsv(shop: string, shopify: ShopifyGraphql, companyId: string, fyKey: string, site: string | null): Promise<{ filename: string; csv: string }> {
   const fy = parseFinancialYear(fyKey) ?? financialYearOf(sydneyMonth(new Date()));
   const from = sydneyMonthRange(fy.months[0]!).start;
   const to = sydneyMonthRange(fy.months[11]!).end;
@@ -269,28 +274,55 @@ export async function exportCsv(shop: string, companyId: string, fyKey: string, 
     where: { shop, companyId, createdAt: { gte: from, lt: to }, ...(site ? { locationId: site } : {}) },
     orderBy: { createdAt: "asc" },
   });
+  type Line = { variantId?: string; sku: string; title?: string; quantity: number; unitExGst: number; lineExGst: number };
+
+  // Product type (and title, as a fallback description) from Shopify, by variant.
+  const variantIds = [...new Set(orders.flatMap((o) => (o.lines as Line[]).map((l) => l.variantId).filter((v): v is string => !!v)))];
+  const products = new Map<string, { type: string; title: string }>();
+  for (let i = 0; i < variantIds.length; i += 100) {
+    try {
+      const d = await shopify<{ nodes: ({ id: string; product: { title: string; productType: string } } | null)[] }>(
+        `#graphql
+        query ReportProducts($ids: [ID!]!) { nodes(ids: $ids) { ... on ProductVariant { id product { title productType } } } }`,
+        { ids: variantIds.slice(i, i + 100) },
+      );
+      for (const n of d.nodes) if (n?.id && n.product) products.set(n.id, { type: n.product.productType ?? "", title: n.product.title ?? "" });
+    } catch (e) {
+      console.error(`[report] product types: ${(e as Error).message}`);
+    }
+  }
+
   const cell = (v: unknown) => {
-    const s = String(v ?? "");
-    return /[",\n]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s;
+    const t = String(v ?? "");
+    return /[",\n]/.test(t) ? `"${t.replace(/"/g, '""')}"` : t;
   };
-  const header = ["Date", "Site", "Unleashed order", "Shopify reference", "PO number", "Ordered by", "Goods ex GST", "Status", "Approved/declined by", "Products"];
-  const lines = orders.map((o) => {
-    const lines = (o.lines as { sku: string; title?: string; quantity: number }[]).map((l) => `${l.quantity} x ${l.title || l.sku} (${l.sku})`).join("; ");
-    return [
+  const header = [
+    "Date", "Site", "Unleashed order", "Shopify reference", "PO number", "Ordered by", "Status", "Approved/declined by",
+    "Product code", "Product description", "Product type", "Quantity", "Unit price ex GST", "Line total ex GST", "Order total ex GST",
+  ];
+  const rows: string[] = [];
+  for (const o of orders) {
+    const order = [
       o.createdAt.toLocaleDateString("en-AU", { timeZone: "Australia/Sydney" }),
       o.siteName,
       o.unleashedOrderNumber ?? "",
       o.draftOrderName ?? "",
       o.poNumber,
       o.buyerName,
-      Number(o.goodsExGst.toString()).toFixed(2),
       STATUS_LABEL[o.status] ?? o.status,
       o.decidedAt ? o.approverName ?? "" : "",
-      lines,
-    ].map(cell).join(",");
-  });
+    ];
+    for (const l of o.lines as Line[]) {
+      const p = l.variantId ? products.get(l.variantId) : undefined;
+      rows.push(
+        [...order, l.sku, l.title || p?.title || "", p?.type ?? "", l.quantity, Number(l.unitExGst).toFixed(2), Number(l.lineExGst).toFixed(2), Number(o.goodsExGst.toString()).toFixed(2)]
+          .map(cell)
+          .join(","),
+      );
+    }
+  }
   const company = orders[0]?.companyName?.replace(/[^A-Za-z0-9]+/g, "-") || "orders";
-  return { filename: `${company}-${fy.key}${site ? "-site" : ""}.csv`, csv: "﻿" + [header.join(","), ...lines].join("\r\n") };
+  return { filename: `${company}-${fy.key}${site ? "-site" : ""}-order-lines.csv`, csv: "\uFEFF" + [header.map(cell).join(","), ...rows].join("\r\n") };
 }
 
 /** Year summary report: month-by-month budget vs ordered, then each site's totals for the year. */
