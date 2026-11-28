@@ -2,7 +2,8 @@
 // Before listing, each order is checked in Unleashed: once staff have entered the PO there as the
 // Customer Reference, the order drops off (and the app records the PO).
 import prisma from "./db.server";
-import { emailer } from "./orders.server";
+import { emailer, graphqlFor } from "./orders.server";
+import { unauthenticated } from "./shopify.server";
 import { COMMITTED } from "./budget.server";
 import { UnleashedClient, UnleashedError } from "../src/unleashed/client.ts";
 import { needsPo, poRequiredSummaryEmail, type PoRequiredRow } from "../src/email/templates.ts";
@@ -13,6 +14,21 @@ function unleashed() {
   const apiKey = process.env.UNLEASHED_API_KEY;
   if (!apiId || !apiKey) throw new Error("UNLEASHED_API_ID / UNLEASHED_API_KEY are not set");
   return new UnleashedClient({ apiId, apiKey, baseUrl: process.env.UNLEASHED_BASE_URL, clientType: process.env.UNLEASHED_CLIENT_TYPE });
+}
+
+async function updateDraftPo(shop: string, draftId: string | null, po: string, name: string | null) {
+  if (!draftId) return;
+  try {
+    const { admin } = await unauthenticated.admin(shop);
+    const r = await graphqlFor(admin)<{ draftOrderUpdate: { userErrors: { message: string }[] } }>(
+      `#graphql
+      mutation PoFromUnleashed($id: ID!, $input: DraftOrderInput!) { draftOrderUpdate(id: $id, input: $input) { userErrors { field message } } }`,
+      { id: draftId, input: { poNumber: po } },
+    );
+    if (r.draftOrderUpdate.userErrors.length) throw new Error(r.draftOrderUpdate.userErrors.map((e) => e.message).join("; "));
+  } catch (e) {
+    console.error(`[po-summary] couldn't update the PO on draft ${name ?? draftId}: ${(e as Error).message}`);
+  }
 }
 
 /** The orders still waiting for a PO (checked against Unleashed). */
@@ -33,7 +49,9 @@ export async function openPoRequired(): Promise<PoRequiredRow[]> {
         if (/deleted/i.test(so?.OrderStatus ?? "")) continue;
         const ref = (so?.CustomerRef ?? "").trim();
         if (ref && !needsPo(ref)) {
-          await prisma.tradeOrder.update({ where: { id: o.id }, data: { poNumber: ref } }); // PO entered in Unleashed
+          // PO entered in Unleashed: record it in the portal (reports) and on the Shopify draft order.
+          await prisma.tradeOrder.update({ where: { id: o.id }, data: { poNumber: ref } });
+          await updateDraftPo(o.shop, o.draftOrderId, ref, o.draftOrderName);
           continue;
         }
       } catch (e) {
