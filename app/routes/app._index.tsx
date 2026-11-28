@@ -6,6 +6,7 @@ import prisma from "../db.server";
 import { priceLines, priceStore } from "../pricing.server";
 import { parseLinesParam } from "../../src/b2b/buyer.ts";
 import { sendPoSummary } from "../po-summary.server";
+import { emailer } from "../orders.server";
 
 // Staff home: sync status and a price check (same engine and data the storefront uses).
 
@@ -21,6 +22,23 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
 export const action = async ({ request }: ActionFunctionArgs) => {
   await authenticate.admin(request);
   const form = await request.formData();
+  if (form.get("intent") === "test-email") {
+    const to = process.env.STAFF_EMAIL;
+    if (!process.env.POSTMARK_SERVER_TOKEN) return { emailTest: { ok: false, text: "POSTMARK_SERVER_TOKEN isn't set on Render, so emails are only written to the log." } };
+    if (!to) return { emailTest: { ok: false, text: "STAFF_EMAIL isn't set on Render." } };
+    try {
+      await emailer().send({
+        to,
+        subject: "Clearchoice trade portal: test email",
+        html: "<p>This is a test from the Clearchoice B2B Portal. If you can read this, Postmark is set up correctly.</p>",
+        text: "This is a test from the Clearchoice B2B Portal. If you can read this, Postmark is set up correctly.",
+        tag: "test",
+      });
+      return { emailTest: { ok: true, text: `Postmark accepted the email. Check the inbox of ${to} (and Postmark → Activity).` } };
+    } catch (e) {
+      return { emailTest: { ok: false, text: `Postmark refused it: ${(e as Error).message}` } };
+    }
+  }
   if (form.get("intent") === "po-summary") {
     try {
       const n = await sendPoSummary();
@@ -59,6 +77,15 @@ export default function Index() {
           price lines, {state.counts.quantityPrices} quantity prices
         </s-paragraph>
         {lastError && <s-banner tone="critical">Last sync failed: {lastError}</s-banner>}
+      </s-section>
+
+      <s-section heading="Email (Postmark)">
+        <s-paragraph>Sends a test email to STAFF_EMAIL through Postmark and shows Postmark's answer.</s-paragraph>
+        <Form method="post">
+          <input type="hidden" name="intent" value="test-email" />
+          <s-button type="submit" variant="secondary">Send test email</s-button>
+        </Form>
+        {result && "emailTest" in result && <s-banner tone={result.emailTest.ok ? "success" : "critical"}>{result.emailTest.text}</s-banner>}
       </s-section>
 
       <s-section heading="Orders waiting for a PO">
