@@ -91,6 +91,10 @@ Upload this file to the new Claude project, then start a chat with:
 
 **Staff "New trade order" email (28 Nov):** trade orders are drafts, so Shopify's own "New order" staff email never fires. The app emails `STAFF_EMAIL` when a trade order reaches Unleashed **with a real PO** (within budget, or once approved; never for "PO REQUIRED" orders or ones still waiting for approval). Subject "New trade order SO-…: Company – Site – PO …"; approved orders say who approved and any changes. Sent once, from `sendToUnleashed` (so retries and approvals are covered).
 
+**Companies without POs + daily PO REQUIRED summary (28 Nov):**
+- Company setting "We don't use purchase orders" (company metafield `b2b.po_not_required`, who/when in `b2b.po_not_required_by`). Set from **Site budgets → Purchase orders** or the tick box above the PO field on the cart (any buyer of the company; saved on the company, stays until unticked). When on: PO optional, "I don't have a PO yet" hidden, blank PO → Customer Reference **"NO PO REQUIRED - <buyer name>"**; staff still get the "New trade order" email.
+- Daily from 8am Sydney: `STAFF_EMAIL` gets "N trade orders waiting for a PO number" — orders sent as "PO REQUIRED" (last 180 days) whose Customer Reference in Unleashed still says so. Enter the PO in Unleashed and the order drops off (the app records it). Only sent when the list isn't empty; once a day (date kept in `SyncState.poSummarySentOn`). Manual "Send the summary now" on the app home page.
+
 **Phase 4 next:**
 1. You: Postmark account → add sender signature / domain **clearchoiceproducts.com**, add its DKIM and Return-Path DNS records, create a Server and copy its **Server API token**.
 2. You: on Render, web service → Environment: `POSTMARK_SERVER_TOKEN` (the token) and `STAFF_EMAIL` (who gets failed orders). Blueprint → Manual Sync if the new keys don't appear. (Until the token is set, emails only go to the Render log.)

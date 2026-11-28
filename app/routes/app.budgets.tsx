@@ -8,6 +8,7 @@ import { addMonths, monthLabel, parseQuarter, quarterOf, shortMonthLabel, sydney
 import { COMMITTED } from "../budget.server";
 import { graphqlFor } from "../orders.server";
 import { setSiteClosed, syncSites } from "../sites.server";
+import { setPoNotRequired } from "../po-setting.server";
 import { isDormant } from "../../src/b2b/siteStatus.ts";
 
 // Staff page: monthly site budgets per company (goods ex GST, Sydney calendar month).
@@ -52,6 +53,8 @@ const LOCATIONS = `#graphql
     company(id: $id) {
       id
       name
+      noPo: metafield(namespace: "b2b", key: "po_not_required") { value }
+      noPoBy: metafield(namespace: "b2b", key: "po_not_required_by") { value }
       locations(first: 250, after: $after, sortKey: NAME) {
         nodes { id name }
         pageInfo { hasNextPage endCursor }
@@ -71,17 +74,21 @@ async function gql<T>(admin: Gql, q: string, variables: Record<string, unknown>)
 async function companySites(admin: Gql, companyId: string) {
   const sites: { id: string; name: string }[] = [];
   let name = "";
+  let noPo = false;
+  let noPoBy: string | null = null;
   let after: string | null = null;
   for (let page = 0; page < 20; page++) {
-    const d: { company: { name: string; locations: { nodes: { id: string; name: string }[]; pageInfo: { hasNextPage: boolean; endCursor: string } } } | null } =
+    const d: { company: { name: string; noPo: { value: string } | null; noPoBy: { value: string } | null; locations: { nodes: { id: string; name: string }[]; pageInfo: { hasNextPage: boolean; endCursor: string } } } | null } =
       await gql(admin, LOCATIONS, { id: companyId, after });
     if (!d.company) break;
     name = d.company.name;
+    noPo = d.company.noPo?.value === "true";
+    noPoBy = d.company.noPoBy?.value ?? null;
     sites.push(...d.company.locations.nodes);
     if (!d.company.locations.pageInfo.hasNextPage) break;
     after = d.company.locations.pageInfo.endCursor;
   }
-  return { name, sites };
+  return { name, sites, noPo, noPoBy };
 }
 
 export const loader = async ({ request }: LoaderFunctionArgs) => {
@@ -98,7 +105,7 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
 
   if (!companyId) return { q, companies, company: null, months: ms, labels, quarter: null, summary: null };
 
-  const { name, sites: allSites } = await companySites(admin, companyId);
+  const { name, sites: allSites, noPo, noPoBy } = await companySites(admin, companyId);
   // Closed sites (obsolete in Unleashed, or closed by the customer) are hidden; dormant = no order in 6 months.
   const statuses = await prisma.siteStatus.findMany({ where: { shop: session.shop, companyId } });
   const statusOf = new Map(statuses.map((st) => [st.locationId, st]));
@@ -170,6 +177,8 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
     company: {
       id: companyId,
       name,
+      noPo,
+      noPoBy,
       sites: sites.map((s) => ({ ...s, ...siteInfo(s.id), default: val(s.id, "default"), months: ms.map((m) => val(s.id, m)) })),
       closedSites,
       showClosed: url.searchParams.get("closed") === "1",
@@ -194,6 +203,11 @@ export const action = async ({ request }: ActionFunctionArgs) => {
     } catch (e) {
       return { error: `Unleashed check failed: ${(e as Error).message}` };
     }
+  }
+  if (intent === "po") {
+    const on = form.get("noPo") === "1";
+    await setPoNotRequired(graphqlFor(admin), companyId, on, `${session.onlineAccessInfo?.associated_user?.email ?? "Clearchoice staff"} (admin)`);
+    return { synced: on ? "This company no longer needs a PO number on its orders." : "PO numbers are required again for this company." };
   }
   if (intent === "reopen") {
     const locationId = String(form.get("location") ?? "");
@@ -307,6 +321,21 @@ export default function Budgets() {
       </s-section>
 
       {data.company && (
+        <>
+        <s-section heading="Purchase orders">
+          <s-paragraph>
+            {data.company.noPo
+              ? "This company doesn't use purchase orders: the PO number is optional on the cart, and orders without one go to Unleashed as \"NO PO REQUIRED - <buyer's name>\"."
+              : "This company needs a PO number on every order (or \"PO REQUIRED\" if the buyer doesn't have one yet)."}
+            {data.company.noPoBy ? ` Last changed: ${data.company.noPoBy}.` : ""}
+          </s-paragraph>
+          <Form method="post">
+            <input type="hidden" name="company" value={data.company.id} />
+            <input type="hidden" name="intent" value="po" />
+            <input type="hidden" name="noPo" value={data.company.noPo ? "0" : "1"} />
+            <s-button type="submit">{data.company.noPo ? "Require PO numbers again" : "This company doesn't use purchase orders"}</s-button>
+          </Form>
+        </s-section>
         <s-section heading={`${data.company.name}: monthly budgets (goods ex GST)`}>
           <s-paragraph>
             "Every month" applies unless a month has its own amount. Leave blank for no budget (orders are never held for
@@ -406,6 +435,7 @@ export default function Budgets() {
             </s-stack>
           </Form>
         </s-section>
+        </>
       )}
 
       {data.company && data.company.showClosed && data.company.closedSites.length > 0 && (

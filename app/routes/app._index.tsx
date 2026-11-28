@@ -5,6 +5,7 @@ import { authenticate } from "../shopify.server";
 import prisma from "../db.server";
 import { priceLines, priceStore } from "../pricing.server";
 import { parseLinesParam } from "../../src/b2b/buyer.ts";
+import { sendPoSummary } from "../po-summary.server";
 
 // Staff home: sync status and a price check (same engine and data the storefront uses).
 
@@ -20,6 +21,14 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
 export const action = async ({ request }: ActionFunctionArgs) => {
   await authenticate.admin(request);
   const form = await request.formData();
+  if (form.get("intent") === "po-summary") {
+    try {
+      const n = await sendPoSummary();
+      return { poSummary: n ? `Sent: ${n} order(s) waiting for a PO.` : "No orders are waiting for a PO, so nothing was sent." };
+    } catch (e) {
+      return { poSummary: `Couldn't send: ${(e as Error).message}` };
+    }
+  }
   const customer = String(form.get("customer") ?? "").trim();
   try {
     const lines = parseLinesParam(String(form.get("lines") ?? "").replace(/\s+/g, ","));
@@ -50,6 +59,18 @@ export default function Index() {
           price lines, {state.counts.quantityPrices} quantity prices
         </s-paragraph>
         {lastError && <s-banner tone="critical">Last sync failed: {lastError}</s-banner>}
+      </s-section>
+
+      <s-section heading="Orders waiting for a PO">
+        <s-paragraph>
+          Every morning from 8am your team (STAFF_EMAIL) gets a list of trade orders sent as "PO REQUIRED" that still
+          have no PO in Unleashed. Enter the PO as the order's Customer Reference in Unleashed and it drops off the list.
+        </s-paragraph>
+        <Form method="post">
+          <input type="hidden" name="intent" value="po-summary" />
+          <s-button type="submit" variant="secondary">Send the summary now</s-button>
+        </Form>
+        {result && "poSummary" in result && <s-banner tone="info">{result.poSummary}</s-banner>}
       </s-section>
 
       <s-section heading="Price check">

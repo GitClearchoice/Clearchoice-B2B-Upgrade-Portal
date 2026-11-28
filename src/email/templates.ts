@@ -183,3 +183,30 @@ export function newTradeOrderEmail(o: OrderSummary, approval: { approverName: st
     text: `${intro}${approvedLine ? `\n\n${approvedLine}` : ""}\n\n${detailsText(o)}\n\n${linesText(o)}`,
   };
 }
+
+export interface PoRequiredRow {
+  placed: Date;
+  unleashedOrderNumber: string | null;
+  reference: string | null;
+  companyName: string;
+  siteName: string;
+  buyerName: string;
+  buyerEmail: string | null;
+  poNumber: string;
+  goodsExGst: number;
+}
+
+/** Daily list for Clearchoice staff: trade orders in Unleashed still waiting for a PO number. */
+export function poRequiredSummaryEmail(rows: PoRequiredRow[], now: Date): Email {
+  const days = (d: Date) => Math.max(0, Math.floor((now.getTime() - d.getTime()) / 86_400_000));
+  const date = (d: Date) => d.toLocaleDateString("en-AU", { timeZone: "Australia/Sydney", day: "numeric", month: "short" });
+  const subject = `${rows.length} trade order${rows.length === 1 ? "" : "s"} waiting for a PO number`;
+  const intro = `These trade orders went to Unleashed as "PO REQUIRED" and still have no PO number. Please request the PO from the buyer and enter it as the Customer Reference in Unleashed; they drop off this list once it's there.`;
+  const cell = "padding:8px 6px;border-bottom:1px solid #eee;vertical-align:top";
+  const html = layout("Orders waiting for a PO number", `<p>${esc(intro)}</p>
+<table role="presentation" style="width:100%;border-collapse:collapse;font-size:14px;margin:12px 0">
+${rows.map((r) => `<tr><td style="${cell}"><b>${esc(r.unleashedOrderNumber ?? r.reference ?? "")}</b> · ${esc(r.companyName)}<br>${esc(r.siteName)}<br><span style="font-size:13px">${esc(r.buyerName)}${r.buyerEmail ? ` &lt;${esc(r.buyerEmail)}&gt;` : ""}</span><br><span style="font-size:12px;color:#777">Placed ${esc(date(r.placed))} · ${days(r.placed)} day${days(r.placed) === 1 ? "" : "s"} waiting</span></td><td style="${cell};text-align:right;white-space:nowrap">${money(r.goodsExGst)}</td></tr>`).join("")}
+</table>`);
+  const text = `${intro}\n\n${rows.map((r) => `${r.unleashedOrderNumber ?? r.reference ?? ""} | ${r.companyName} – ${r.siteName} | ${r.buyerName}${r.buyerEmail ? ` <${r.buyerEmail}>` : ""} | placed ${date(r.placed)} (${days(r.placed)} days) | ${money(r.goodsExGst)} ex GST`).join("\n")}`;
+  return { subject, html, text };
+}

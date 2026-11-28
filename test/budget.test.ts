@@ -95,6 +95,7 @@ const buyer: BuyerContext = {
   contactId: "gid://shopify/CompanyContact/5",
   companyId: "gid://shopify/Company/9",
   companyName: "Assetlink",
+  poNotRequired: false,
   sites: [{ id: SITE, name: "Westpoint Blacktown", customerCode: "ASSETLINK" }],
   site: { id: SITE, name: "Westpoint Blacktown", customerCode: "ASSETLINK" },
 };
@@ -360,4 +361,24 @@ test("staff aren't told about orders still waiting for a PO, or not yet approved
   emails = [];
   await order(5); // over budget, has a PO: waiting for approval
   assert.ok(!emails.some((e) => e.tag === "new-trade-order"));
+});
+
+test("company that doesn't use POs: blank PO goes through as NO PO REQUIRED - <name> and staff are told", async () => {
+  const r = await order(1, { poNumber: "", buyer: { ...buyer, poNotRequired: true } });
+  assert.equal(r.status, "sent");
+  assert.equal(posts[0].CustomerRef, "NO PO REQUIRED - Pat Buyer");
+  assert.ok(emails.some((e) => e.tag === "new-trade-order" && /PO NO PO REQUIRED - Pat Buyer/.test(e.subject)));
+  await assert.rejects(order(1, { poNumber: "" }), OrderError); // other companies still need one
+});
+
+test("daily PO REQUIRED summary email lists each order with days waiting", async () => {
+  const { poRequiredSummaryEmail, needsPo } = await import("../src/email/templates.ts");
+  const e = poRequiredSummaryEmail(
+    [{ placed: new Date("2026-11-25T01:00:00Z"), unleashedOrderNumber: "SO-7", reference: "#D3", companyName: "Assetlink", siteName: "Westpoint", buyerName: "William Smith", buyerEmail: "w@x", poNumber: "PO REQUIRED - William Smith", goodsExGst: 120 }],
+    new Date("2026-11-28T01:00:00Z"),
+  );
+  assert.equal(e.subject, "1 trade order waiting for a PO number");
+  assert.match(e.text, /SO-7 \| Assetlink – Westpoint \| William Smith <w@x> \| placed 25 Nov \(3 days\) \| \$120\.00 ex GST/);
+  assert.equal(needsPo("NO PO REQUIRED - Pat"), false); // companies without POs aren't chased
+  assert.equal(needsPo("PO TO FOLLOW - Pat"), true);
 });

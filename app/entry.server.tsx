@@ -7,10 +7,12 @@ import { isbot } from "isbot";
 import { addDocumentResponseHeaders } from "./shopify.server";
 import { startOrderRetryLoop } from "./orders.server";
 import { startSiteSyncLoop } from "./sites.server";
+import { startPoSummaryLoop } from "./po-summary.server";
 
 // Retries trade orders that didn't reach Unleashed (every 5 minutes).
 startOrderRetryLoop();
 startSiteSyncLoop();
+startPoSummaryLoop();
 
 export const streamTimeout = 5000;
 

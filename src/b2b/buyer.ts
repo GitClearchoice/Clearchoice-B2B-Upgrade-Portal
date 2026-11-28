@@ -14,6 +14,7 @@ export const BUYER_QUERY = `#graphql
           id
           name
           code: metafield(namespace: "unleashed", key: "customer_code") { value }
+          noPo: metafield(namespace: "b2b", key: "po_not_required") { value }
         }
         roleAssignments(first: 250) {
           nodes {
@@ -36,7 +37,7 @@ export interface BuyerQueryData {
     email: { emailAddress: string } | null;
     companyContactProfiles: {
       id: string;
-      company: { id: string; name: string; code: { value: string } | null };
+      company: { id: string; name: string; code: { value: string } | null; noPo?: { value: string } | null };
       roleAssignments: {
         nodes: { companyLocation: { id: string; name: string; code: { value: string } | null; closed?: { value: string } | null } | null }[];
       };
@@ -58,6 +59,8 @@ export interface BuyerContext {
   contactId: string;
   companyId: string;
   companyName: string;
+  /** Company setting "we don't use purchase orders" (company metafield b2b.po_not_required). */
+  poNotRequired: boolean;
   sites: BuyerSite[];
   site: BuyerSite;
 }
@@ -106,6 +109,7 @@ export function buyerContext(data: BuyerQueryData, locationId?: string | null): 
     contactId: profile.id,
     companyId: profile.company.id,
     companyName: profile.company.name,
+    poNotRequired: profile.company.noPo?.value === "true",
     sites,
     site,
   };

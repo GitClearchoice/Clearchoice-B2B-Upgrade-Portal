@@ -90,6 +90,8 @@ model SyncState {
   lastFullSyncAt   DateTime?
   lastChangeSyncAt DateTime?
   lastError        String?
+  /// Sydney date (YYYY-MM-DD) the daily "PO REQUIRED" summary was last sent.
+  poSummarySentOn  String?
 }
 
 // Trade orders placed through the portal. id = the Unleashed SalesOrder Guid, saved before sending.

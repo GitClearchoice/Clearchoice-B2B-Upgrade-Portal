@@ -43,6 +43,7 @@ const buyer: BuyerContext = {
   contactId: "gid://shopify/CompanyContact/5",
   companyId: "gid://shopify/Company/9",
   companyName: "Assetlink",
+  poNotRequired: false,
   sites: [{ id: "gid://shopify/CompanyLocation/7", name: "Westpoint Blacktown", customerCode: "ASSETLINK" }],
   site: { id: "gid://shopify/CompanyLocation/7", name: "Westpoint Blacktown", customerCode: "ASSETLINK" },
 };

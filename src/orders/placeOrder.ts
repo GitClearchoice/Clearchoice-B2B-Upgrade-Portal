@@ -151,6 +151,9 @@ export class OrderError extends Error {}
 
 export const MAX_ATTEMPTS = 10;
 
+/** Customer Reference for companies that don't use purchase orders: "NO PO REQUIRED - <buyer name>". */
+export const noPoReference = (buyerName: string) => `NO PO REQUIRED - ${buyerName}`.trim().slice(0, 100);
+
 const SITE_AND_VARIANTS = `#graphql
   query OrderSite($location: ID!, $variants: [ID!]!) {
     companyLocation(id: $location) {
@@ -249,7 +252,8 @@ export async function placeTradeOrder(deps: OrderDeps, input: PlaceOrderInput): 
   const existing = await deps.orders.findByRequestKey(input.shop, input.requestKey);
   if (existing) return { ...resultOf(existing), alreadyPlaced: true };
 
-  const poNumber = input.poNumber.trim();
+  // Companies that don't use purchase orders: a blank PO goes to Unleashed as "NO PO REQUIRED - <buyer>".
+  const poNumber = input.poNumber.trim() || (input.buyer.poNotRequired ? noPoReference(input.buyer.name) : "");
   if (!poNumber) throw new OrderError("Enter a PO number");
   if (poNumber.length > 100) throw new OrderError("PO number is too long (100 characters max)");
   const note = input.note?.trim().slice(0, 500) || null;

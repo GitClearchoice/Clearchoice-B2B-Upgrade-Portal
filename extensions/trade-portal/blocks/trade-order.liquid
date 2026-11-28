@@ -3,12 +3,15 @@
   The order goes to the app (/apps/b2b/orders), which prices it again on the server.
 {%- endcomment -%}
 {%- if customer and customer.b2b? -%}
+  {%- comment -%} Company setting "we don't use purchase orders" (saved on the company, stays until unticked). {%- endcomment -%}
+  {%- assign no_po = false -%}
+  {%- if customer.current_company.metafields.b2b.po_not_required.value == true -%}{%- assign no_po = true -%}{%- endif -%}
   <div
     class="cc-trade-order"
     data-cc-trade-order
     data-proxy="/apps/b2b"
     data-location="{{ customer.current_location.id }}"
-    data-po-required="{{ block.settings.po_required }}"
+    data-po-required="{% if block.settings.po_required and no_po == false %}true{% else %}false{% endif %}"
     data-buyer-name="{{ customer.first_name | append: ' ' | append: customer.last_name | strip | escape }}"
     {{ block.shopify_attributes }}
   >
@@ -75,11 +78,15 @@
       is dropped by the browser (and a submit button would send the theme's form to checkout).
     {%- endcomment -%}
     <div class="cc-trade-order__form" data-cc-form>
+      <label class="cc-trade-order__no-po cc-trade-order__company-no-po">
+        <input type="checkbox" data-cc-company-no-po {% if no_po %}checked{% endif %}>
+        We don't use purchase orders <small>(applies to all our orders until unticked)</small>
+      </label>
       <label>
-        <span data-cc-po-label>PO number{% if block.settings.po_required %} *{% endif %}</span>
+        <span data-cc-po-label>{% if no_po %}PO number (optional){% else %}PO number{% if block.settings.po_required %} *{% endif %}{% endif %}</span>
         <input type="text" data-cc-po maxlength="80" autocomplete="off" {% if block.settings.po_required %}aria-required="true"{% endif %}>
       </label>
-      <label class="cc-trade-order__no-po">
+      <label class="cc-trade-order__no-po" {% if no_po %}hidden{% endif %}>
         <input type="checkbox" data-cc-no-po>
         I don't have a PO number yet
       </label>

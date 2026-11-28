@@ -159,6 +159,25 @@
         poEl.focus();
       });
     }
+    // "We don't use purchase orders": saved on the company (all buyers, all orders) until unticked.
+    var companyNoPoEl = el.querySelector("[data-cc-company-no-po]");
+    if (companyNoPoEl) {
+      companyNoPoEl.addEventListener("change", function () {
+        var on = companyNoPoEl.checked;
+        companyNoPoEl.disabled = true;
+        showError("");
+        fetch(proxy + "/settings/po", {
+          method: "POST",
+          credentials: "same-origin",
+          headers: { "Content-Type": "application/json", Accept: "application/json" },
+          body: JSON.stringify({ notRequired: on }),
+        })
+          .then(function (r) { return readJson(r).then(function (b) { if (!r.ok || !b.ok) throw new Error(b.error || "The setting couldn't be saved."); }); })
+          .then(function () { window.location.reload(); })
+          .catch(function (e) { companyNoPoEl.checked = !on; companyNoPoEl.disabled = false; showError(e.message); });
+      });
+    }
+
     function poValue() {
       var v = poEl.value.trim();
       if (noPoEl && noPoEl.checked) return v ? ("PO REQUIRED - " + v).slice(0, 100) : "";
@@ -377,7 +396,7 @@
             body: JSON.stringify({
               requestKey: requestKey,
               location: location,
-              poNumber: po || "-",
+              poNumber: po,
               note: noteEl.value.trim(),
               lines: cartItems.map(function (i) { return { variantId: String(i.variant_id), quantity: i.quantity }; }),
             }),
