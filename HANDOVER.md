@@ -64,7 +64,7 @@ Upload this file to the new Claude project, then start a chat with:
 - Theme cart prices/totals hidden for trade buyers (embed setting "Theme cart price elements to hide"; this theme uses `.price__current`). The theme's cart footer (order note, subtotal) to be hidden the same way once its class is known.
 - Trade order block: works inside the theme's cart `<form>` (no nested form); searchable site picker (Shopify `url_to_set_as_current`); delivery note label "Phone Number / Delivery hours"; Place order button Pantone 192 C (#E40046), bold, larger; re-prices when the theme changes the cart (fetch/XHR watch + re-check after clicks and every 4 s; `/cart.js` only, no API cost).
 - Quantity breaks: `/apps/b2b/prices?breaks=1` returns each buyer's real breaks (`src/pricing/breaks.ts`); shown under the theme cart's quantity boxes and the product trade price, 16px, active break in red.
-- Dev store: stock comes from the Unleashed Shopify app's stock sync; some products still show 0 (Unleashed integration linking/warehouse), so the theme's backorder message shows. Live store sells when out of stock (inventory policy continue + theme's Back order button), so the app needs no stock logic.
+- Dev store: stock comes from the Unleashed Shopify app's stock sync; some products still show 0 (Unleashed integration linking/warehouse), so the theme's backorder message shows. **Left as is (28 Nov):** the live store's products are already linked and syncing stock, so this is a dev-store-only gap. Live store sells when out of stock (inventory policy continue + theme's Back order button), so the app needs no stock logic.
 - Pricing changes in Unleashed show after the nightly full sync (or Render → clearchoice-b2b-sync → Trigger Run). A daytime changes-sync cron was offered and declined (27 Nov).
 
 **Phase 4 — budgets, approvals, emails: code written (28 Nov), not yet run on the store.** Email service: **Postmark** (decided 27 Nov).
@@ -82,6 +82,8 @@ Upload this file to the new Claude project, then start a chat with:
 - Runs daily in the web process (15 min after start, then every 24 h) and from **Site budgets → "Update sites from Unleashed now"**, which lists every change. Closed sites: "Show closed sites" → why/when/by whom, **Reopen**.
 - **Dormant** badge on Site budgets: no order for **6 months** (Unleashed sales orders matched on customer code + delivery name, plus portal orders; recorded by the daily check).
 - Head-office admin closes a site: `POST /apps/b2b/sites/close` (only the company's budget approver) → switched off at once + staff emailed to obsolete it in Unleashed. Button comes with the phase 5 customer budgets page.
+
+**Mobile (28 Nov):** checked at 360px and 390px. Cart lines stack on phones below 750px (scoped CSS with !important to beat theme table styles), full-width Place order button, quantity breaks on their own line under the theme's quantity row, two-column order lists in emails and on the approval page. Site budgets (staff, Shopify admin) left desktop-first. Phase 5 customer page to be designed for phones from the start.
 
 **Phase 4 next:**
 1. You: Postmark account → add sender signature / domain **clearchoiceproducts.com**, add its DKIM and Return-Path DNS records, create a Server and copy its **Server API token**.
