@@ -238,6 +238,23 @@
       if (!busy) submitEl.textContent = buttonLabel;
     }
 
+    // Put the breaks on their own line under the quantity box. Themes often put the quantity box in a
+    // row with other things (remove button, price); inserting into that row would squeeze the list
+    // into a narrow column, so step out of horizontal flex rows (up to 3 levels) and span grid rows.
+    function placeBelow(anchor, list) {
+      var target = anchor;
+      for (var i = 0; i < 3 && target.parentElement; i++) {
+        var cs = window.getComputedStyle(target.parentElement);
+        var rowFlex = /flex/.test(cs.display) && !/column/.test(cs.flexDirection);
+        if (!rowFlex) break;
+        target = target.parentElement;
+      }
+      target.insertAdjacentElement("afterend", list);
+      var ps = list.parentElement && window.getComputedStyle(list.parentElement);
+      if (ps && /grid/.test(ps.display)) list.style.gridColumn = "1 / -1";
+      if (ps && /flex/.test(ps.display) && !/column/.test(ps.flexDirection)) { list.style.flexBasis = "100%"; list.style.width = "100%"; }
+    }
+
     // Quantity breaks under each quantity box in the theme's cart. Returns false if the theme's
     // quantity boxes can't be matched to cart lines (then they're shown in the trade table instead).
     function showThemeBreaks(body) {
@@ -267,7 +284,7 @@
         var list = box.firstChild;
         list.classList.add("cc-qty-breaks--theme");
         var anchor = input.closest("quantity-input, .quantity, .qty, .quantity-selector, .cart-item__quantity-wrapper") || input;
-        anchor.insertAdjacentElement("afterend", list);
+        placeBelow(anchor, list);
       });
       return matched > 0;
     }
