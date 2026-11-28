@@ -129,6 +129,16 @@ function SiteBudgets({ tabs }) {
   );
 }
 
+// One-line summary of a section with a Show / Hide link, so the page stays short (expand what you need).
+function Toggle({ summary, open, onToggle, showLabel, hideLabel = 'Hide' }) {
+  return (
+    <s-grid gridTemplateColumns="1fr auto" gap="base" alignItems="center">
+      <s-text type="strong">{summary}</s-text>
+      <s-link onClick={onToggle}>{open ? hideLabel : showLabel}</s-link>
+    </s-grid>
+  );
+}
+
 function Approvals({ items }) {
   if (!items.length) return null;
   return (
@@ -153,6 +163,7 @@ function Approvals({ items }) {
 }
 
 function Quarter({ data, loading, onQuarter, onSaved, onError }) {
+  const [open, setOpen] = useState(data.sites.length <= 5);
   const [search, setSearch] = useState('');
   const [importing, setImporting] = useState(false);
   const [busy, setBusy] = useState(false);
@@ -180,6 +191,14 @@ function Quarter({ data, loading, onQuarter, onSaved, onError }) {
   return (
     <s-section heading={`Budgets: ${data.quarter.label}`}>
       <s-stack direction="block" gap="base">
+        <Toggle
+          summary={budgetSummary(data)}
+          open={open}
+          onToggle={() => setOpen(!open)}
+          showLabel={`Show sites (${data.sites.length})`}
+          hideLabel="Hide sites"
+        />
+        {open && (<>
         <s-stack direction="inline" gap="base" justifyContent="end">
           {data.budgetsExportUrl && <s-button href={data.budgetsExportUrl} target="_blank" variant="secondary">Export CSV</s-button>}
           <s-button variant="secondary" onClick={() => setImporting(!importing)}>{importing ? 'Cancel import' : 'Import CSV'}</s-button>
@@ -208,9 +227,18 @@ function Quarter({ data, loading, onQuarter, onSaved, onError }) {
           <s-button variant="secondary" onClick={() => setShown(shown + PAGE_SIZE)}>Show more sites ({matches.length - shown} more)</s-button>
         )}
         {!matches.length && <s-text color="subdued">No sites match your search.</s-text>}
+        </>)}
       </s-stack>
     </s-section>
   );
+}
+
+function budgetSummary(data) {
+  const withBudget = data.sites.filter((s) => s.now.budget != null);
+  const over = withBudget.filter((s) => s.now.ordered > s.now.budget).length;
+  const ordered = data.sites.reduce((t, s) => t + s.now.ordered, 0);
+  const budget = withBudget.reduce((t, s) => t + s.now.budget, 0);
+  return `${data.sites.length} site${data.sites.length === 1 ? '' : 's'}${over ? ` · ${over} over budget` : ''} · ${money(ordered)}${budget ? ` of ${money(budget)}` : ''} ordered in ${data.thisMonth.label}`;
 }
 
 function Site({ site, data, onSaved, onError }) {
@@ -326,9 +354,12 @@ function SiteSelect({ data, onSite }) {
 
 function Year({ data, loading, onFy, onSite }) {
   const y = data.year;
+  const [open, setOpen] = useState(true);
   return (
     <s-section heading={`Year summary: ${y.label}`}>
       <s-stack direction="block" gap="base">
+        <Toggle summary={`${money(y.totals.budget)} budget · ${money(y.totals.ordered)} ordered`} open={open} onToggle={() => setOpen(!open)} showLabel="Show year" />
+        {open && (<>
         <s-stack direction="inline" gap="base">
           <s-button variant="secondary" disabled={loading} onClick={() => onFy(y.prev)}>‹ Previous year</s-button>
           <s-button variant="secondary" disabled={loading} onClick={() => onFy(y.next)}>Next year ›</s-button>
@@ -348,16 +379,27 @@ function Year({ data, loading, onFy, onSite }) {
           <s-text type="strong">{money(y.totals.ordered)}</s-text>
         </s-grid>
         <s-text color="subdued">Budget counts sites that have one; ordered counts orders sent to Clearchoice (including approved ones). Goods ex GST.</s-text>
+        </>)}
       </s-stack>
     </s-section>
   );
 }
 
 function Orders({ data }) {
+  const [open, setOpen] = useState(false);
+  const total = data.orders.reduce((t, o) => t + o.goodsExGst, 0);
   return (
     <s-section heading={`Order history: ${data.year.label}${data.year.site ? ` · ${data.sites.find((s) => s.id === data.year.site)?.name ?? ''}` : ''}`}>
       <s-stack direction="block" gap="base">
+        <Toggle
+          summary={`${data.orders.length}${data.orders.length === 200 ? '+' : ''} order${data.orders.length === 1 ? '' : 's'} · ${money(total)} ex GST`}
+          open={open}
+          onToggle={() => setOpen(!open)}
+          showLabel="Show orders"
+          hideLabel="Hide orders"
+        />
         {data.exportUrl && <s-button href={data.exportUrl} target="_blank" variant="secondary">Download CSV</s-button>}
+        {open && (<>
         {!data.orders.length && <s-text color="subdued">No trade orders in this period.</s-text>}
         {data.orders.map((o) => (
           <s-box key={o.id} padding="small-200" border="base" borderRadius="base">
@@ -370,6 +412,7 @@ function Orders({ data }) {
           </s-box>
         ))}
         {data.orders.length === 200 && <s-text color="subdued">Showing the latest 200. Download the CSV for all of them.</s-text>}
+        </>)}
       </s-stack>
     </s-section>
   );
