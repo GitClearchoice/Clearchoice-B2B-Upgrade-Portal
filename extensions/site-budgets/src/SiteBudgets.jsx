@@ -187,7 +187,7 @@ function Quarter({ data, loading, onQuarter, onSaved, onError }) {
   }
   const [shown, setShown] = useState(PAGE_SIZE);
   const words = search.toLowerCase().split(/\s+/).filter(Boolean);
-  const matches = data.sites.filter((s) => words.every((w) => s.name.toLowerCase().includes(w)));
+  const matches = data.sites.filter((s) => words.every((w) => `${s.name} ${s.code || ''}`.toLowerCase().includes(w)));
   return (
     <s-section heading={`Budgets: ${data.quarter.label}`}>
       <s-stack direction="block" gap="base">
@@ -249,7 +249,9 @@ function Site({ site, data, onSaved, onError }) {
   const now = site.now;
   const over = now.budget != null && now.ordered > now.budget;
 
+  const [code, setCode] = useState(site.code || '');
   function startEdit() {
+    setCode(site.code || '');
     const v = { default: site.default ?? '' };
     data.quarter.months.forEach((m, i) => { v[m.key] = site.months[i] ?? ''; });
     setValues(v);
@@ -260,7 +262,7 @@ function Site({ site, data, onSaved, onError }) {
     try {
       const out = {};
       for (const [k, v] of Object.entries(values)) out[k] = v === '' || v === null ? null : Number(v);
-      await api('POST', '/customer/budgets', { action: 'save', site: site.id, values: out });
+      await api('POST', '/customer/budgets', { action: 'save', site: site.id, values: out, siteCode: code });
       setMode('');
       onSaved(`Budgets saved for ${site.name}.`);
     } catch (e) { onError(e.message); } finally { setBusy(false); }
@@ -280,7 +282,7 @@ function Site({ site, data, onSaved, onError }) {
         {/* Site details on the left; the two actions as small links on the right, lined up with the bottom lines. */}
         <s-grid gridTemplateColumns="1fr auto" gap="base" alignItems="end">
           <s-stack direction="block" gap="small-200">
-            <s-text type="strong">{site.name}</s-text>
+            <s-text type="strong">{site.name}{site.code ? ` · ${site.code}` : ''}</s-text>
             {now.budget == null ? (
               <s-text color="subdued">{data.thisMonth.label}: no budget set · {money(now.ordered)} ordered</s-text>
             ) : (
@@ -316,6 +318,7 @@ function Site({ site, data, onSaved, onError }) {
 
         {mode === 'edit' && (
           <s-stack direction="block" gap="base">
+            <s-text-field label="Site code (your own reference for this site, optional)" value={code} onInput={(e) => setCode(e.currentTarget.value)} />
             <s-number-field label="Every month ($ ex GST)" min={0} step={1} value={values.default} onInput={(e) => setValues({ ...values, default: e.currentTarget.value })} />
             {data.quarter.months.map((m) => (
               <s-number-field key={m.key} label={`${m.label} only (blank = every month)`} min={0} step={1} value={values[m.key]} onInput={(e) => setValues({ ...values, [m.key]: e.currentTarget.value })} />

@@ -33,6 +33,8 @@ export interface Quote {
   companyName: string;
   customerCode: string;
   siteName: string;
+  /** The customer's own code for the site (their system's identifier), if set. */
+  siteCode: string | null;
   deliveryAddress: string[];
   preparedFor: string;
   lines: QuoteLine[];
@@ -102,6 +104,7 @@ export async function buildQuote(
     companyName: buyer.companyName,
     customerCode: buyer.site.customerCode,
     siteName: d.companyLocation?.name ?? buyer.site.name,
+    siteCode: null,
     deliveryAddress: a
       ? [a.address1, a.address2, [a.city, a.zoneCode, a.zip].filter(Boolean).join(" "), a.countryCode === "AU" ? "Australia" : a.countryCode].filter((x): x is string => !!x && !!x.trim())
       : [],
@@ -118,12 +121,12 @@ const auDate = (d: Date) => d.toLocaleDateString("en-AU", { timeZone: "Australia
 /** CSV of the quote lines, for approval / purchasing systems that import spreadsheets. */
 export function quoteCsv(q: Quote): string {
   const header = [
-    "Quote number", "Quote date", "Valid until", "Supplier", "Supplier ABN", "Customer", "Site",
+    "Quote number", "Quote date", "Valid until", "Supplier", "Supplier ABN", "Customer", "Site", "Site code",
     "Item code", "Description", "Quantity", "Unit price ex GST", "Tax rate", "Line amount ex GST", "GST", "Line amount inc GST",
   ];
   const rows = q.lines.map((l) =>
     [
-      q.number, auDate(q.date), auDate(q.validUntil), SUPPLIER.name, SUPPLIER.abn, q.companyName, q.siteName,
+      q.number, auDate(q.date), auDate(q.validUntil), SUPPLIER.name, SUPPLIER.abn, q.companyName, q.siteName, q.siteCode ?? "",
       l.sku, l.description, l.quantity, l.unitExGst.toFixed(2), l.gst ? "GST 10%" : "GST free", l.lineExGst.toFixed(2), l.gst.toFixed(2), (l.lineExGst + l.gst).toFixed(2),
     ].map(csvCell).join(","),
   );

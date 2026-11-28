@@ -2,6 +2,7 @@ import type { ActionFunctionArgs, LoaderFunctionArgs } from "react-router";
 import { customerContext, handleCustomer, json } from "../customer-auth.server";
 import { budgetsView, importBudgetsCsv, openSites, saveSiteBudgets } from "../customer-budgets.server";
 import { closeSiteForCustomer } from "../sites.server";
+import { setSiteCode } from "../site-codes.server";
 
 // Backend for the customer account page "Site budgets" (extension extensions/site-budgets).
 // Head-office admin only. GET ?quarter=FY2027-Q2&fy=FY2027&site=<location id>
@@ -26,7 +27,7 @@ async function budgetsLoader(request: Request) {
 async function budgetsAction(request: Request) {
   const c = await customerContext(request);
   if (!c.buyer || !c.isAdmin) return c.cors(json({ error: "Only your head-office admin can change site budgets." }, 403));
-  let body: { action?: string; site?: string; values?: Record<string, number | null>; reason?: string; csv?: string };
+  let body: { action?: string; site?: string; values?: Record<string, number | null>; reason?: string; csv?: string; siteCode?: string | null };
   try { body = await request.json(); } catch { return c.cors(json({ error: "Bad request" }, 400)); }
   if (body.action === "import") {
     const by = `${c.buyer.name}${c.buyer.email ? ` <${c.buyer.email}>` : ""} (customer account, CSV import)`;
@@ -46,6 +47,7 @@ async function budgetsAction(request: Request) {
       const values: Record<string, number | null> = {};
       for (const [k, v] of Object.entries(body.values ?? {})) values[k] = v === null || v === undefined || (v as unknown) === "" ? null : Number(v);
       await saveSiteBudgets(c.shop, c.buyer.companyId, { id: site.locationId, name: site.name }, values, by);
+      if (body.siteCode !== undefined) await setSiteCode(c.shop, { companyId: c.buyer.companyId, locationId: site.locationId, name: site.name }, body.siteCode);
       return c.cors(json({ ok: true }));
     }
     if (body.action === "close") {

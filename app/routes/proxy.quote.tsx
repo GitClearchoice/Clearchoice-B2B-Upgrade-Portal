@@ -7,12 +7,13 @@ import { BUYER_QUERY, BuyerError, buyerContext, type BuyerQueryData } from "../.
 import { OrderError } from "../../src/orders/placeOrder.ts";
 import { PricingError } from "../../src/pricing/engine.ts";
 import { buildQuote, quoteCsv } from "../../src/orders/quote.ts";
+import { siteCodeFor } from "../site-codes.server";
 
 // POST https://<shop>/apps/b2b/quote  (JSON) { location, format: "pdf" | "csv", lines: [{ variantId, quantity }] }
 // The cart's "Download quote": priced on the server for the buyer's site, valid 30 days.
 export const action = async ({ request }: ActionFunctionArgs) => {
   if (request.method !== "POST") return json({ error: "POST only" }, 405);
-  const { admin } = await authenticate.public.appProxy(request);
+  const { admin, session } = await authenticate.public.appProxy(request);
   const customerId = new URL(request.url).searchParams.get("logged_in_customer_id");
   if (!customerId) return json({ error: "Please log in" }, 401);
   if (!admin) return json({ error: "App not installed" }, 503);
@@ -30,6 +31,7 @@ export const action = async ({ request }: ActionFunctionArgs) => {
       buyer,
       Array.isArray(body.lines) ? body.lines.map((l) => ({ variantId: String(l.variantId), quantity: Number(l.quantity) })) : [],
     );
+    if (session) quote.siteCode = await siteCodeFor(session.shop, buyer.site.id);
     if (body.format === "csv") {
       return new Response(quoteCsv(quote), {
         headers: { "Content-Type": "text/csv; charset=utf-8", "Content-Disposition": `attachment; filename="Clearchoice-quote-${quote.number}.csv"`, "Cache-Control": "private, no-store" },

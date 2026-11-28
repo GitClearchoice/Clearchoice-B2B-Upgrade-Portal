@@ -400,11 +400,12 @@ test("budgets CSV: write, read back (quotes, $ and commas), bad amounts refused"
   const { writeBudgetCsv, readBudgetCsv } = await import("../src/b2b/budgetCsv.ts");
   const csv = writeBudgetCsv(
     [{ key: "2026-10", label: "Oct 2026" }, { key: "2026-11", label: "Nov 2026" }],
-    [{ id: "gid://shopify/CompanyLocation/1", name: 'Westpoint, "Dock 3"', default: 1500, months: [null, 1200] }],
+    [{ id: "gid://shopify/CompanyLocation/1", name: 'Westpoint, "Dock 3"', code: "CC-104", default: 1500, months: [null, 1200] }],
   );
-  assert.match(csv, /^﻿Site,Every month,Oct 2026 \(2026-10\),Nov 2026 \(2026-11\),Site ID\r\n"Westpoint, ""Dock 3""",1500,,1200,gid:\/\/shopify\/CompanyLocation\/1$/);
+  assert.match(csv, /^﻿Site,Site code,Every month,Oct 2026 \(2026-10\),Nov 2026 \(2026-11\),Site ID\r\n"Westpoint, ""Dock 3""",CC-104,1500,,1200,gid:\/\/shopify\/CompanyLocation\/1$/);
   const rows = readBudgetCsv(csv.replace("1200", '"$1,250.50"'));
-  assert.deepEqual(rows, [{ site: 'Westpoint, "Dock 3"', siteId: "gid://shopify/CompanyLocation/1", values: { default: 1500, "2026-10": null, "2026-11": 1250.5 } }]);
+  assert.deepEqual(rows, [{ site: 'Westpoint, "Dock 3"', siteId: "gid://shopify/CompanyLocation/1", siteCode: "CC-104", values: { default: 1500, "2026-10": null, "2026-11": 1250.5 } }]);
+  assert.equal("siteCode" in readBudgetCsv("Site,Every month\nA,1")[0]!, false); // no Site code column: codes left alone
   assert.throws(() => readBudgetCsv("Site,Every month\nA,lots"), /Not a valid amount: row 2/);
   assert.throws(() => readBudgetCsv("Name,Every month\nA,1"), /needs a "Site"/);
 });

@@ -19,6 +19,7 @@ import {
 } from "../src/orders/budget.ts";
 import type { ShopifyGraphql } from "../src/orders/placeOrder.ts";
 import { readBudgetCsv, writeBudgetCsv } from "../src/b2b/budgetCsv.ts";
+import { setSiteCode, siteCodes } from "./site-codes.server";
 
 const STATUS_LABEL: Record<string, string> = {
   sent: "Sent to Clearchoice",
@@ -52,7 +53,7 @@ export async function budgetsView(shop: string, shopify: ShopifyGraphql, company
   const thisMonth = sydneyMonth(now);
   const quarter = parseQuarter(p.quarter) ?? quarterOf(thisMonth);
   const fy = parseFinancialYear(p.fy) ?? financialYearOf(thisMonth);
-  const sites = await openSites(shop, shopify, companyId);
+  const [sites, codes] = await Promise.all([openSites(shop, shopify, companyId), siteCodes(shop, companyId)]);
   const siteIds = new Set(sites.map((s) => s.locationId));
   const siteFilter = p.site && siteIds.has(p.site) ? p.site : null;
 
@@ -108,6 +109,7 @@ export async function budgetsView(shop: string, shopify: ShopifyGraphql, company
       return {
         id: s.locationId,
         name: s.name,
+        code: codes.get(s.locationId) ?? null,
         default: val(s.locationId, "default"),
         months: quarter.months.map((m) => val(s.locationId, m)),
         effective: quarter.months.map((m) => effective(s.locationId, m)),
@@ -157,7 +159,7 @@ export async function budgetsView(shop: string, shopify: ShopifyGraphql, company
                 else budget += b;
                 ordered += spent(st.locationId, m).committed;
               }
-              return { name: st.name, budget: round(budget), ordered: round(ordered), monthsWithoutBudget: unbudgeted };
+              return { name: st.name, code: codes.get(st.locationId) ?? "", budget: round(budget), ordered: round(ordered), monthsWithoutBudget: unbudgeted };
             })
           : undefined,
       };
@@ -231,7 +233,7 @@ export function verifyExport(secret: string, q: URLSearchParams): boolean {
 /** The company's open sites with their budgets for a quarter, as the budgets CSV. */
 export async function exportBudgetsCsv(shop: string, shopify: ShopifyGraphql, companyId: string, quarterKey: string | null) {
   const quarter = parseQuarter(quarterKey) ?? quarterOf(sydneyMonth(new Date()));
-  const sites = await openSites(shop, shopify, companyId);
+  const [sites, codes] = await Promise.all([openSites(shop, shopify, companyId), siteCodes(shop, companyId)]);
   const rows = await prisma.siteBudget.findMany({ where: { shop, companyId, month: { in: ["default", ...quarter.months] } } });
   const val = (loc: string, m: string) => {
     const r = rows.find((x) => x.locationId === loc && x.month === m);
@@ -239,7 +241,7 @@ export async function exportBudgetsCsv(shop: string, shopify: ShopifyGraphql, co
   };
   const csv = writeBudgetCsv(
     quarter.months.map((m) => ({ key: m, label: shortMonthLabel(m) })),
-    sites.map((s) => ({ id: s.locationId, name: s.name, default: val(s.locationId, "default"), months: quarter.months.map((m) => val(s.locationId, m)) })),
+    sites.map((s) => ({ id: s.locationId, name: s.name, code: codes.get(s.locationId) ?? null, default: val(s.locationId, "default"), months: quarter.months.map((m) => val(s.locationId, m)) })),
   );
   return { filename: `site-budgets-${quarter.key}.csv`, csv };
 }
@@ -256,6 +258,7 @@ export async function importBudgetsCsv(shop: string, shopify: ShopifyGraphql, co
     const site = (r.siteId && byId.get(r.siteId)) || (r.site ? byName.get(r.site.toLowerCase()) : undefined);
     if (!site) { unknown.push(r.site || r.siteId || "(no name)"); continue; }
     await saveSiteBudgets(shop, companyId, { id: site.locationId, name: site.name }, r.values, by);
+    if (r.siteCode !== undefined) await setSiteCode(shop, { companyId, locationId: site.locationId, name: site.name }, r.siteCode);
     updated++;
   }
   return { updated, unknown };
@@ -296,8 +299,9 @@ export async function exportCsv(shop: string, shopify: ShopifyGraphql, companyId
     const t = String(v ?? "");
     return /[",\n]/.test(t) ? `"${t.replace(/"/g, '""')}"` : t;
   };
+  const codes = await siteCodes(shop, companyId);
   const header = [
-    "Date", "Site", "Unleashed order", "Shopify reference", "PO number", "Ordered by", "Status", "Approved/declined by",
+    "Date", "Site", "Site code", "Unleashed order", "Shopify reference", "PO number", "Ordered by", "Status", "Approved/declined by",
     "Product code", "Product description", "Product type", "Quantity", "Unit price ex GST", "Line total ex GST", "Order total ex GST",
   ];
   const rows: string[] = [];
@@ -305,6 +309,7 @@ export async function exportCsv(shop: string, shopify: ShopifyGraphql, companyId
     const order = [
       o.createdAt.toLocaleDateString("en-AU", { timeZone: "Australia/Sydney" }),
       o.siteName,
+      codes.get(o.locationId) ?? "",
       o.unleashedOrderNumber ?? "",
       o.draftOrderName ?? "",
       o.poNumber,
@@ -347,10 +352,10 @@ export async function exportYearCsv(shop: string, shopify: ShopifyGraphql, compa
     }),
     row("Total", amt(y.totals.budget), amt(y.totals.ordered), y.totals.budget >= y.totals.ordered ? amt(y.totals.budget - y.totals.ordered) : "", y.totals.budget < y.totals.ordered ? amt(y.totals.ordered - y.totals.budget) : ""),
     "",
-    row("Site", "Budget for the year", "Ordered", "Remaining", "Over by", "Months without a budget"),
+    row("Site", "Site code", "Budget for the year", "Ordered", "Remaining", "Over by", "Months without a budget"),
     ...(y.perSite ?? []).map((st) => {
       const diff = st.budget - st.ordered;
-      return row(st.name, amt(st.budget), amt(st.ordered), st.budget && diff >= 0 ? amt(diff) : "", st.budget && diff < 0 ? amt(-diff) : "", st.monthsWithoutBudget);
+      return row(st.name, st.code, amt(st.budget), amt(st.ordered), st.budget && diff >= 0 ? amt(diff) : "", st.budget && diff < 0 ? amt(-diff) : "", st.monthsWithoutBudget);
     }),
   ];
   return { filename: `year-summary-${y.key}${site ? "-site" : ""}.csv`, csv: "\uFEFF" + lines.join("\r\n") };

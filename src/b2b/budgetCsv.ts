@@ -39,6 +39,8 @@ export function columnKey(h: string): string | null {
 export interface BudgetCsvRow {
   site?: string;
   siteId?: string;
+  /** Present when the file has a "Site code" column (blank = clear the code). */
+  siteCode?: string;
   values: Record<string, number | null>;
 }
 
@@ -48,6 +50,7 @@ export function readBudgetCsv(text: string): BudgetCsvRow[] {
   const header = (rows.shift() ?? []).map((h) => h.trim());
   const siteCol = header.findIndex((h) => /^site$/i.test(h));
   const idCol = header.findIndex((h) => /^site id$/i.test(h));
+  const codeCol = header.findIndex((h) => /^site code$/i.test(h));
   const valueCols = header.map((h, i) => ({ i, key: columnKey(h) })).filter((c) => c.key);
   if (siteCol < 0 && idCol < 0) throw new Error('The CSV needs a "Site" or "Site ID" column. Export first and use that file as the template.');
   if (!valueCols.length) throw new Error('The CSV needs an "Every month" column and/or month columns like "Oct 2026 (2026-10)".');
@@ -60,7 +63,12 @@ export function readBudgetCsv(text: string): BudgetCsvRow[] {
       else if (Number.isFinite(Number(raw)) && Number(raw) >= 0 && Number(raw) < 100_000_000) values[c.key!] = Math.round(Number(raw) * 100) / 100;
       else bad.push(`row ${n + 2}: "${r[c.i]}"`);
     }
-    return { site: siteCol >= 0 ? r[siteCol]?.trim() : undefined, siteId: idCol >= 0 ? r[idCol]?.trim() : undefined, values };
+    return {
+      site: siteCol >= 0 ? r[siteCol]?.trim() : undefined,
+      siteId: idCol >= 0 ? r[idCol]?.trim() : undefined,
+      ...(codeCol >= 0 ? { siteCode: (r[codeCol] ?? "").trim() } : {}),
+      values,
+    };
   });
   if (bad.length) throw new Error(`Not a valid amount: ${bad.slice(0, 5).join(", ")}${bad.length > 5 ? "…" : ""}. Nothing was imported.`);
   return out;
@@ -68,9 +76,9 @@ export function readBudgetCsv(text: string): BudgetCsvRow[] {
 
 export function writeBudgetCsv(
   months: { key: string; label: string }[],
-  sites: { id: string; name: string; default: number | null; months: (number | null)[] }[],
+  sites: { id: string; name: string; code?: string | null; default: number | null; months: (number | null)[] }[],
 ): string {
-  const header = ["Site", "Every month", ...months.map((m) => `${m.label} (${m.key})`), "Site ID"];
-  const lines = sites.map((s) => [s.name, s.default ?? "", ...s.months.map((v) => v ?? ""), s.id].map(csvCell).join(","));
+  const header = ["Site", "Site code", "Every month", ...months.map((m) => `${m.label} (${m.key})`), "Site ID"];
+  const lines = sites.map((s) => [s.name, s.code ?? "", s.default ?? "", ...s.months.map((v) => v ?? ""), s.id].map(csvCell).join(","));
   return "﻿" + [header.map(csvCell).join(","), ...lines].join("\r\n");
 }

@@ -54,6 +54,7 @@ export function quotePdf(q: Quote): Promise<Buffer> {
     const leftEnd = doc.y;
     doc.font("Helvetica-Bold").text(q.siteName, left + col, y + 13, { width: col });
     doc.font("Helvetica");
+    if (q.siteCode) doc.text(`Site code: ${q.siteCode}`, { width: col });
     for (const l of q.deliveryAddress) doc.text(l, { width: col });
     y = Math.max(leftEnd, doc.y) + 16;
 

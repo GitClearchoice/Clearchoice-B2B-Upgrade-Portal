@@ -165,6 +165,8 @@ model SiteStatus {
   closedAt    DateTime?
   closedBy    String?
   lastOrderAt DateTime?
+  /// The customer's own code for this site (their system's identifier), shown on quotes and reports.
+  siteCode    String?
   updatedAt   DateTime  @updatedAt
 
   @@unique([shop, locationId])

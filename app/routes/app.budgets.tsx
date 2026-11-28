@@ -10,6 +10,7 @@ import { COMMITTED } from "../budget.server";
 import { graphqlFor } from "../orders.server";
 import { setSiteClosed, syncSites } from "../sites.server";
 import { setPoNotRequired } from "../po-setting.server";
+import { setSiteCode, siteCodes } from "../site-codes.server";
 import { isDormant } from "../../src/b2b/siteStatus.ts";
 
 // Staff page: monthly site budgets per company (goods ex GST, Sydney calendar month).
@@ -109,6 +110,7 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
   const { name, sites: allSites, noPo, noPoBy } = await companySites(admin, companyId);
   // Closed sites (obsolete in Unleashed, or closed by the customer) are hidden; dormant = no order in 6 months.
   const statuses = await prisma.siteStatus.findMany({ where: { shop: session.shop, companyId } });
+  const codes = new Map(statuses.filter((x) => x.siteCode).map((x) => [x.locationId, x.siteCode!]));
   const statusOf = new Map(statuses.map((st) => [st.locationId, st]));
   const sites = allSites.filter((st) => !statusOf.get(st.id)?.closed);
   const now = new Date();
@@ -180,7 +182,7 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
       name,
       noPo,
       noPoBy,
-      sites: sites.map((s) => ({ ...s, ...siteInfo(s.id), default: val(s.id, "default"), months: ms.map((m) => val(s.id, m)) })),
+      sites: sites.map((s) => ({ ...s, ...siteInfo(s.id), code: codes.get(s.id) ?? "", default: val(s.id, "default"), months: ms.map((m) => val(s.id, m)) })),
       closedSites,
       showClosed: url.searchParams.get("closed") === "1",
     },
@@ -207,7 +209,7 @@ export const action = async ({ request }: ActionFunctionArgs) => {
   }
   if (intent === "import") {
     // Rows from an uploaded budgets CSV (parsed in the browser): match sites by Site ID, else by name.
-    let rows: { siteId?: string; site?: string; values: Record<string, number | null> }[];
+    let rows: { siteId?: string; site?: string; siteCode?: string; values: Record<string, number | null> }[];
     try { rows = JSON.parse(String(form.get("rows") ?? "[]")); } catch { return { error: "The CSV couldn't be read." }; }
     const { sites: all } = await companySites(admin, companyId);
     const byId = new Map(all.map((x) => [x.id, x]));
@@ -221,6 +223,7 @@ export const action = async ({ request }: ActionFunctionArgs) => {
       if (!site) { unknown.push(r.site || r.siteId || "(no name)"); continue; }
       try {
         await saveSiteBudgets(session.shop, companyId, { id: site.id, name: site.name }, r.values, by);
+        if (r.siteCode !== undefined) await setSiteCode(session.shop, { companyId, locationId: site.id, name: site.name }, r.siteCode);
         updated++;
       } catch (e) {
         bad.push(`${site.name}: ${(e as Error).message}`);
@@ -285,6 +288,14 @@ export const action = async ({ request }: ActionFunctionArgs) => {
   }
   if (bad.length) return { error: `Not a valid amount: ${bad.slice(0, 5).join(", ")}${bad.length > 5 ? "…" : ""}` };
   await prisma.$transaction(ops);
+  // Site codes (the customer's own identifier for each site).
+  const existingCodes = await siteCodes(session.shop, companyId);
+  for (const site of sites) {
+    const raw = form.get(`code:${site.id}`);
+    if (raw === null) continue;
+    const code = String(raw).trim();
+    if (code !== (existingCodes.get(site.id) ?? "")) await setSiteCode(session.shop, { companyId, locationId: site.id, name: site.name }, code);
+  }
   return { saved: true };
 };
 
@@ -351,9 +362,9 @@ export default function Budgets() {
 
   function exportCsv() {
     if (!data.company) return;
-    const header = ["Site", "Every month", ...data.months.map((m, i) => `${data.labels[i]} (${m})`), "Site ID"];
+    const header = ["Site", "Site code", "Every month", ...data.months.map((m, i) => `${data.labels[i]} (${m})`), "Site ID"];
     const lines = data.company.sites.map((x) =>
-      [x.name, x.default ?? "", ...x.months.map((v) => v ?? ""), x.id].map(csvCell).join(","),
+      [x.name, x.code ?? "", x.default ?? "", ...x.months.map((v) => v ?? ""), x.id].map(csvCell).join(","),
     );
     const blob = new Blob(["\uFEFF" + [header.map(csvCell).join(","), ...lines].join("\r\n")], { type: "text/csv;charset=utf-8" });
     const a = document.createElement("a");
@@ -370,6 +381,7 @@ export default function Budgets() {
     const header = rows.shift()?.map((h) => h.trim()) ?? [];
     const siteCol = header.findIndex((h) => /^site$/i.test(h));
     const idCol = header.findIndex((h) => /^site id$/i.test(h));
+    const codeCol = header.findIndex((h) => /^site code$/i.test(h));
     const valueCols = header.map((h, i) => ({ i, key: columnKey(h) })).filter((c) => c.key);
     if (siteCol < 0 && idCol < 0) return setImportError('The CSV needs a "Site" or "Site ID" column. Export first and use that file as the template.');
     if (!valueCols.length) return setImportError('The CSV needs an "Every month" column and/or month columns like "Oct 2026 (2026-10)".');
@@ -382,7 +394,7 @@ export default function Budgets() {
         else if (Number.isFinite(Number(raw)) && Number(raw) >= 0) values[c.key!] = Number(raw);
         else bad.push(`row ${n + 2}: "${r[c.i]}"`);
       }
-      return { site: siteCol >= 0 ? r[siteCol] : undefined, siteId: idCol >= 0 ? r[idCol] : undefined, values };
+      return { site: siteCol >= 0 ? r[siteCol] : undefined, siteId: idCol >= 0 ? r[idCol] : undefined, ...(codeCol >= 0 ? { siteCode: (r[codeCol] ?? "").trim() } : {}), values };
     });
     if (bad.length) return setImportError(`Not a valid amount: ${bad.slice(0, 5).join(", ")}${bad.length > 5 ? "…" : ""}. Nothing was imported.`);
     if (!data.company) return;
@@ -528,6 +540,7 @@ export default function Budgets() {
                 <thead>
                   <tr>
                     <th style={th}>Site</th>
+                    <th style={th}>Site code</th>
                     <th style={th}>Every month</th>
                     {data.labels.map((l) => <th style={th} key={l}>{l}</th>)}
                   </tr>
@@ -545,6 +558,7 @@ export default function Budgets() {
                           </>
                         )}
                       </td>
+                      <td style={td}><s-text-field label="Site code" labelAccessibilityVisibility="exclusive" name={`code:${s.id}`} value={s.code} placeholder="Customer's code" /></td>
                       <td style={td}><s-text-field label="Every month" labelAccessibilityVisibility="exclusive" name={`default:${s.id}`} value={s.default?.toString() ?? ""} /></td>
                       {s.months.map((v, i) => (
                         <td style={td} key={i}><s-text-field label={data.labels[i]!} labelAccessibilityVisibility="exclusive" name={`m${i}:${s.id}`} value={v?.toString() ?? ""} /></td>
