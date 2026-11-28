@@ -1,6 +1,7 @@
 import '@shopify/ui-extensions/preact';
 import { render } from 'preact';
 import { useEffect, useErrorBoundary, useState } from 'preact/hooks';
+import { SiteManagers } from './Managers.jsx';
 
 // The app's backend (Render web service). Keep in step with application_url in shopify.app.toml.
 const APP_URL = 'https://clearchoice-b2b.onrender.com';
@@ -21,7 +22,29 @@ function Safe() {
       </s-page>
     );
   }
-  return <SiteBudgets />;
+  return <Root />;
+}
+
+// Two views on one page: Site budgets and Site managers. The "Site Managers" menu item links here with
+// ?view=managers (a second full-page extension wouldn't load on Shopify).
+function initialView() {
+  try {
+    const url = (shopify.navigation && shopify.navigation.currentEntry && shopify.navigation.currentEntry.url) || '';
+    return /view=managers|\/managers\b/.test(url) ? 'managers' : 'budgets';
+  } catch (e) {
+    return 'budgets';
+  }
+}
+
+function Root() {
+  const [view, setView] = useState(initialView);
+  const tabs = (
+    <s-stack direction="inline" gap="base">
+      <s-button variant={view === 'budgets' ? 'primary' : 'secondary'} onClick={() => setView('budgets')}>Site budgets</s-button>
+      <s-button variant={view === 'managers' ? 'primary' : 'secondary'} onClick={() => setView('managers')}>Site managers</s-button>
+    </s-stack>
+  );
+  return view === 'managers' ? <SiteManagers tabs={tabs} /> : <SiteBudgets tabs={tabs} />;
 }
 
 const money = (n) => '$' + Number(n || 0).toLocaleString('en-AU', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
@@ -39,7 +62,7 @@ async function api(method, path, body) {
   return data;
 }
 
-function SiteBudgets() {
+function SiteBudgets({ tabs }) {
   const [params, setParams] = useState({ quarter: '', fy: '', site: '' });
   const [data, setData] = useState(null);
   const [error, setError] = useState('');
@@ -68,6 +91,7 @@ function SiteBudgets() {
   if (!data) {
     return (
       <s-page heading="Site budgets">
+        {tabs}
         {error ? <s-banner tone="critical">{error}</s-banner> : <s-text color="subdued">Loading…</s-text>}
       </s-page>
     );
@@ -86,6 +110,7 @@ function SiteBudgets() {
   return (
     <s-page heading="Site budgets" subheading={data.company}>
       <s-stack direction="block" gap="large">
+        {tabs}
         {error && <s-banner tone="critical">{error}</s-banner>}
         {notice && <s-banner tone="success">{notice}</s-banner>}
         <Approvals items={data.approvals} />

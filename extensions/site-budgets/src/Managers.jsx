@@ -1,29 +1,11 @@
-import '@shopify/ui-extensions/preact';
-import { render } from 'preact';
-import { useEffect, useErrorBoundary, useState } from 'preact/hooks';
+import { useEffect, useState } from 'preact/hooks';
 
-// The app's backend (Render web service). Keep in step with application_url in shopify.app.toml.
+// "Site managers" view of the Site budgets page (head-office admin): who can order for which sites.
+// Backend: /customer/team. (A separate full-page extension wouldn't load on Shopify, so it lives here.)
 const APP_URL = 'https://clearchoice-b2b.onrender.com';
 const SHOW_SITES = 50;
 
-export default async () => {
-  render(<Safe />, document.body);
-};
-
-function Safe() {
-  const [err, reset] = useErrorBoundary((e) => console.error('Site managers:', e));
-  if (err) {
-    return (
-      <s-page heading="Site managers">
-        <s-banner tone="critical">Sorry, something went wrong on this page: {String(err && err.message ? err.message : err)}</s-banner>
-        <s-button variant="secondary" onClick={reset}>Try again</s-button>
-      </s-page>
-    );
-  }
-  return <SiteManagers />;
-}
-
-async function api(method, body) {
+async function teamApi(method, body) {
   const token = await shopify.sessionToken.get();
   const res = await fetch(`${APP_URL}/customer/team`, {
     method,
@@ -37,20 +19,21 @@ async function api(method, body) {
 
 const roleLabel = (r) => (r === 'admin' ? 'Location admin' : 'Ordering only');
 
-function SiteManagers() {
+export function SiteManagers({ tabs }) {
   const [data, setData] = useState(null);
   const [error, setError] = useState('');
   const [notice, setNotice] = useState('');
   const [editing, setEditing] = useState(null); // null | { mode: 'add' } | { mode: 'edit', person }
 
   function load() {
-    return api('GET').then((d) => { setData(d); setError(''); }).catch((e) => setError(e.message));
+    return teamApi('GET').then((d) => { setData(d); setError(''); }).catch((e) => setError(e.message));
   }
   useEffect(() => { load(); }, []);
 
   if (!data) {
     return (
       <s-page heading="Site managers">
+        {tabs}
         {error ? <s-banner tone="critical">{error}</s-banner> : <s-text color="subdued">Loading…</s-text>}
       </s-page>
     );
@@ -74,6 +57,7 @@ function SiteManagers() {
   return (
     <s-page heading="Site managers" subheading={data.company}>
       <s-stack direction="block" gap="large">
+        {tabs}
         {error && <s-banner tone="critical">{error}</s-banner>}
         {notice && <s-banner tone="success">{notice}</s-banner>}
         <s-section heading="Who can order for your sites">
@@ -112,7 +96,7 @@ function Person({ person: p, disabled, onEdit, onDone, onError }) {
   const [busy, setBusy] = useState(false);
   async function remove() {
     setBusy(true);
-    try { const r = await api('POST', { action: 'remove', contactId: p.id }); onDone(r.message); }
+    try { const r = await teamApi('POST', { action: 'remove', contactId: p.id }); onDone(r.message); }
     catch (e) { onError(e.message); }
     finally { setBusy(false); }
   }
@@ -177,8 +161,8 @@ function PersonForm({ mode, person, sites, onCancel, onDone, onError }) {
     setBusy(true);
     try {
       const r = mode === 'add'
-        ? await api('POST', { action: 'add', firstName, lastName, email, role, sites: [...chosen] })
-        : await api('POST', { action: 'update', contactId: person.id, role, sites: [...chosen] });
+        ? await teamApi('POST', { action: 'add', firstName, lastName, email, role, sites: [...chosen] })
+        : await teamApi('POST', { action: 'update', contactId: person.id, role, sites: [...chosen] });
       onDone(r.message);
     } catch (e) { onError(e.message); }
     finally { setBusy(false); }
