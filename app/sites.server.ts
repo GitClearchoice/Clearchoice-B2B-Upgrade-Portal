@@ -244,6 +244,13 @@ export async function syncSites(shopify: ShopifyGraphql, shop: string, log = (m:
       update: { siteName: s.name, ...(lastOrderAt ? { lastOrderAt } : {}) },
     });
   }
+  // New sites a head-office admin asked for: apply their site code, budget and site managers.
+  try {
+    const { completeSiteRequests } = await import("./site-requests.server");
+    res.changes.push(...(await completeSiteRequests(shop, shopify)).map((x) => `Site request: ${x}`));
+  } catch (e) {
+    res.errors.push(`Site requests: ${(e as Error).message}`);
+  }
   log(`${shop}: ${sites.length} sites, ${res.changes.length} added/updated, ${res.closed.length} closed, ${res.reopened.length} reopened, ${orders.length} Unleashed orders read${res.errors.length ? `, ${res.errors.length} errors` : ""}`);
   return res;
 }

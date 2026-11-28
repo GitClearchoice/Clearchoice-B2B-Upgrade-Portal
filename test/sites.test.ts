@@ -130,3 +130,12 @@ test("site refresh: nothing to change when Shopify already matches", async () =>
   assert.deepEqual(siteDifferences(same, plan.sites[1]!), []);
   assert.deepEqual(siteDifferences({ ...same, note: null }, plan.sites[1]!), ["delivery note"]);
 });
+
+test("requested sites are recognised when they appear (case, punctuation, group prefix)", async () => {
+  const { matchesRequest } = await import("../src/b2b/siteStatus.ts");
+  assert.equal(matchesRequest("New Depot", "new depot"), true);
+  assert.equal(matchesRequest("New-Depot (Penrith)", "New Depot Penrith"), true);
+  assert.equal(matchesRequest("CMMD - New Depot", "New Depot"), true);
+  assert.equal(matchesRequest("Old Depot", "New Depot"), false);
+  assert.equal(matchesRequest("New Depot", ""), false);
+});

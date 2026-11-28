@@ -3,6 +3,7 @@ import { customerContext, handleCustomer, json } from "../customer-auth.server";
 import { budgetsView, importBudgetsCsv, openSites, saveSiteBudgets } from "../customer-budgets.server";
 import { closeSiteForCustomer } from "../sites.server";
 import { setSiteCode } from "../site-codes.server";
+import { cancelSiteRequest, createSiteRequest, pendingSiteRequests, type SiteRequestInput } from "../site-requests.server";
 
 // Backend for the customer account page "Site budgets" (extension extensions/site-budgets).
 // Head-office admin only. GET ?quarter=FY2027-Q2&fy=FY2027&site=<location id>
@@ -21,14 +22,27 @@ async function budgetsLoader(request: Request) {
     fy: url.searchParams.get("fy"),
     site: url.searchParams.get("site"),
   });
-  return c.cors(json({ trade: true, isAdmin: true, company: c.buyer.companyName, ...view }));
+  const siteRequests = await pendingSiteRequests(c.shop, c.buyer.companyId);
+  return c.cors(json({ trade: true, isAdmin: true, company: c.buyer.companyName, ...view, siteRequests }));
 }
 
 async function budgetsAction(request: Request) {
   const c = await customerContext(request);
   if (!c.buyer || !c.isAdmin) return c.cors(json({ error: "Only your head-office admin can change site budgets." }, 403));
-  let body: { action?: string; site?: string; values?: Record<string, number | null>; reason?: string; csv?: string; siteCode?: string | null };
+  let body: { action?: string; site?: string; values?: Record<string, number | null>; reason?: string; csv?: string; siteCode?: string | null; request?: SiteRequestInput; requestId?: string };
   try { body = await request.json(); } catch { return c.cors(json({ error: "Bad request" }, 400)); }
+  if (body.action === "request-site" || body.action === "cancel-request") {
+    try {
+      if (body.action === "request-site") {
+        const r = await createSiteRequest(c.shop, c.shopify, c.buyer, body.request ?? {});
+        return c.cors(json({ ok: true, message: `Thanks. We've asked Clearchoice to add "${r.siteName}". You'll get an email when it's ready to order for.` }));
+      }
+      await cancelSiteRequest(c.shop, c.buyer.companyId, String(body.requestId ?? ""));
+      return c.cors(json({ ok: true, message: "Request cancelled." }));
+    } catch (e) {
+      return c.cors(json({ error: (e as Error).message }, 400));
+    }
+  }
   if (body.action === "import") {
     const by = `${c.buyer.name}${c.buyer.email ? ` <${c.buyer.email}>` : ""} (customer account, CSV import)`;
     try {

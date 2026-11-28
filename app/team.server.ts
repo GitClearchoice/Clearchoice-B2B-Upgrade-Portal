@@ -244,3 +244,36 @@ export async function removePerson(shopify: ShopifyGraphql, companyId: string, a
   const { companyName } = await companyRoles(shopify, companyId);
   await notifyStaff(companyName, actor, `Removed ${contact.customer?.displayName} <${email}> from the company`);
 }
+
+/** Gives each contact Ordering access (Location admin if that's their role elsewhere) to one more site. */
+export async function grantSiteAccess(shopify: ShopifyGraphql, companyId: string, contactIds: string[], locationId: string): Promise<string[]> {
+  if (!contactIds.length) return [];
+  const { roles } = await companyRoles(shopify, companyId);
+  const list = await contacts(shopify, companyId);
+  const done: string[] = [];
+  for (const id of contactIds) {
+    const c = list.find((x) => x.id === id);
+    if (!c?.customer) continue;
+    const current = await allAssignments(shopify, c);
+    if (current.some((a) => a.companyLocation?.id === locationId)) {
+      done.push(c.customer.displayName);
+      continue;
+    }
+    const role = current.some((a) => /admin/i.test(a.role.name)) ? roles.admin.id : roles.ordering.id;
+    const r = await shopify<{ companyContactAssignRoles: { userErrors: UserError[] } }>(
+      `#graphql
+      mutation GrantSite($id: ID!, $roles: [CompanyContactRoleAssign!]!) { companyContactAssignRoles(companyContactId: $id, rolesToAssign: $roles) { userErrors { field message } } }`,
+      { id: c.id, roles: [{ companyContactRoleId: role, companyLocationId: locationId }] },
+    );
+    check(`Giving ${c.customer.displayName} the new site`, r.companyContactAssignRoles.userErrors);
+    done.push(c.customer.displayName);
+  }
+  return done;
+}
+
+/** Names of the given contacts (for emails). */
+export async function contactNames(shopify: ShopifyGraphql, companyId: string, ids: string[]): Promise<string[]> {
+  if (!ids.length) return [];
+  const list = await contacts(shopify, companyId);
+  return ids.map((id) => list.find((c) => c.id === id)?.customer?.displayName).filter((n): n is string => !!n);
+}

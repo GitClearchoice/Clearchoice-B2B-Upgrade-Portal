@@ -166,6 +166,7 @@ function Quarter({ data, loading, onQuarter, onSaved, onError }) {
   const [open, setOpen] = useState(data.sites.length <= 5);
   const [search, setSearch] = useState('');
   const [importing, setImporting] = useState(false);
+  const [requesting, setRequesting] = useState(false);
   const [busy, setBusy] = useState(false);
 
   // Import: the CSV is read here and sent to the app, which checks every row before saving any.
@@ -202,7 +203,10 @@ function Quarter({ data, loading, onQuarter, onSaved, onError }) {
         <s-stack direction="inline" gap="base" justifyContent="end">
           {data.budgetsExportUrl && <s-button href={data.budgetsExportUrl} target="_blank" variant="secondary">Export CSV</s-button>}
           <s-button variant="secondary" onClick={() => setImporting(!importing)}>{importing ? 'Cancel import' : 'Import CSV'}</s-button>
+          <s-button variant="secondary" onClick={() => setRequesting(!requesting)}>{requesting ? 'Cancel request' : 'Request a new site'}</s-button>
         </s-stack>
+        {requesting && <RequestSite onDone={(msg) => { setRequesting(false); onSaved(msg); }} onError={onError} />}
+        <PendingRequests items={data.siteRequests || []} onDone={onSaved} onError={onError} />
         {importing && (
           <s-box padding="base" border="base" borderRadius="base">
             <s-stack direction="block" gap="base">
@@ -230,6 +234,96 @@ function Quarter({ data, loading, onQuarter, onSaved, onError }) {
         </>)}
       </s-stack>
     </s-section>
+  );
+}
+
+// "Request a new site": emailed to Clearchoice to add in Unleashed; once the site appears in the portal the
+// site code, budget and site managers chosen here are applied automatically.
+const STATES = ['NSW', 'VIC', 'QLD', 'SA', 'WA', 'TAS', 'ACT', 'NT'];
+
+function RequestSite({ onDone, onError }) {
+  const [f, setF] = useState({ siteName: '', address1: '', address2: '', suburb: '', state: 'NSW', postcode: '', siteCode: '', contactName: '', contactPhone: '', deliveryNotes: '', monthlyBudget: '' });
+  const [people, setPeople] = useState([]);
+  const [managers, setManagers] = useState(new Set());
+  const [busy, setBusy] = useState(false);
+  useEffect(() => {
+    api('GET', '/customer/team').then((d) => setPeople((d.people || []).filter((p) => !p.locked))).catch(() => setPeople([]));
+  }, []);
+  const set = (k) => (e) => { const v = e.currentTarget.value; setF((prev) => ({ ...prev, [k]: v })); };
+  function toggle(id, on) {
+    const next = new Set(managers);
+    if (on) next.add(id); else next.delete(id);
+    setManagers(next);
+  }
+  async function send() {
+    setBusy(true);
+    try {
+      const r = await api('POST', '/customer/budgets', { action: 'request-site', request: { ...f, managerIds: [...managers] } });
+      onDone(r.message);
+    } catch (e) { onError(e.message); } finally { setBusy(false); }
+  }
+  return (
+    <s-box padding="base" border="base" borderRadius="base">
+      <s-stack direction="block" gap="base">
+        <s-heading>Request a new site</s-heading>
+        <s-text color="subdued">Clearchoice adds the site to your account (usually within a working day) and emails you when you can order for it.</s-text>
+        <s-text-field label="Site name" value={f.siteName} onInput={set('siteName')} />
+        <s-text-field label="Street address" value={f.address1} onInput={set('address1')} />
+        <s-text-field label="Address line 2 (optional)" value={f.address2} onInput={set('address2')} />
+        <s-grid gridTemplateColumns="1fr auto auto" gap="base">
+          <s-text-field label="Suburb" value={f.suburb} onInput={set('suburb')} />
+          <s-select label="State" value={f.state} onChange={set('state')}>
+            {STATES.map((st) => <s-option key={st} value={st}>{st}</s-option>)}
+          </s-select>
+          <s-text-field label="Postcode" value={f.postcode} onInput={set('postcode')} maxLength={4} />
+        </s-grid>
+        <s-text-field label="Site code (your own reference, optional)" value={f.siteCode} onInput={set('siteCode')} />
+        <s-grid gridTemplateColumns="1fr 1fr" gap="base">
+          <s-text-field label="Site contact (optional)" value={f.contactName} onInput={set('contactName')} />
+          <s-text-field label="Contact phone (optional)" value={f.contactPhone} onInput={set('contactPhone')} />
+        </s-grid>
+        <s-text-area label="Delivery notes, e.g. dock, hours (optional)" value={f.deliveryNotes} onInput={set('deliveryNotes')} />
+        <s-number-field label="Monthly budget, $ ex GST (optional)" min={0} step={1} value={f.monthlyBudget} onInput={set('monthlyBudget')} />
+        {people.length > 0 && (
+          <s-stack direction="block" gap="small-200">
+            <s-text type="strong">Site managers who should order for it (optional)</s-text>
+            {people.map((p) => (
+              <s-checkbox key={p.id} label={`${p.name}${p.email ? ` (${p.email})` : ''}`} checked={managers.has(p.id)} onChange={(e) => toggle(p.id, e.currentTarget.checked)} />
+            ))}
+          </s-stack>
+        )}
+        <s-stack direction="inline" gap="base">
+          <s-button variant="primary" loading={busy} onClick={send}>Send request</s-button>
+        </s-stack>
+      </s-stack>
+    </s-box>
+  );
+}
+
+function PendingRequests({ items, onDone, onError }) {
+  if (!items.length) return null;
+  async function cancel(id) {
+    try {
+      const r = await api('POST', '/customer/budgets', { action: 'cancel-request', requestId: id });
+      onDone(r.message);
+    } catch (e) { onError(e.message); }
+  }
+  return (
+    <s-stack direction="block" gap="small-200">
+      <s-text type="strong">New sites requested</s-text>
+      {items.map((r) => (
+        <s-box key={r.id} padding="small-200" border="base" borderRadius="base">
+          <s-grid gridTemplateColumns="1fr auto" gap="base" alignItems="center">
+            <s-stack direction="block" gap="small-300">
+              <s-text type="strong">{r.siteName}</s-text>
+              <s-text color="subdued">{r.address} · requested {date(r.requested)} by {r.requestedBy}</s-text>
+              <s-text color="subdued">Waiting for Clearchoice to add it</s-text>
+            </s-stack>
+            <s-link onClick={() => cancel(r.id)}>Cancel</s-link>
+          </s-grid>
+        </s-box>
+      ))}
+    </s-stack>
   );
 }
 

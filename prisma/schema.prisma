@@ -172,3 +172,34 @@ model SiteStatus {
   @@unique([shop, locationId])
   @@index([shop, companyId])
 }
+
+// A head-office admin's request for a new delivery site. Staff add it to the customer's Delivery tab in
+// Unleashed; when the site sync brings it into Shopify, the requested site code, budget and site
+// managers are applied and the request is marked done.
+model SiteRequest {
+  id              String    @id @default(cuid())
+  shop            String
+  companyId       String
+  companyName     String
+  customerCode    String?
+  requestedBy     String
+  requestedEmail  String?
+  siteName        String
+  address1        String
+  address2        String?
+  suburb          String
+  state           String
+  postcode        String
+  siteCode        String?
+  contactName     String?
+  contactPhone    String?
+  deliveryNotes   String?
+  monthlyBudget   Decimal?  @db.Decimal(14, 2)
+  managerIds      Json? // CompanyContact GIDs to give Ordering access
+  status          String    @default("pending") // pending | done | cancelled
+  locationId      String?
+  createdAt       DateTime  @default(now())
+  completedAt     DateTime?
+
+  @@index([shop, companyId, status])
+}

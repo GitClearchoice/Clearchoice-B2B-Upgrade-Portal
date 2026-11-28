@@ -112,3 +112,13 @@ export function isDormant(lastOrderAt: Date | null, now: Date, months = DORMANT_
   cutoff.setMonth(cutoff.getMonth() - months);
   return lastOrderAt < cutoff;
 }
+
+const normName = (s: string) => s.toLowerCase().replace(/[^a-z0-9]/g, "");
+
+/** A site requested by name has appeared: same name (ignoring case/punctuation), or a group's "Member - Name". */
+export function matchesRequest(siteName: string, requested: string): boolean {
+  const b = normName(requested);
+  if (!b) return false;
+  const dash = siteName.indexOf(" - ");
+  return normName(siteName) === b || (dash >= 0 && normName(siteName.slice(dash + 3)) === b);
+}

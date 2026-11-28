@@ -230,3 +230,49 @@ export function teamChangeEmail(p: { companyName: string; adminName: string; cha
   const intro = `${p.adminName} changed who can order for ${p.companyName}:`;
   return { subject, html: layout("Site access changed", `<p>${esc(intro)}</p><p><b>${esc(p.change)}</b></p>`), text: `${intro}\n\n${p.change}` };
 }
+
+export interface SiteRequestDetails {
+  companyName: string;
+  customerCode: string | null;
+  requestedBy: string;
+  siteName: string;
+  address: string[];
+  siteCode?: string | null;
+  contactName?: string | null;
+  contactPhone?: string | null;
+  deliveryNotes?: string | null;
+  monthlyBudget?: number | null;
+  managers?: string[];
+}
+
+/** To Clearchoice staff: a head-office admin asked for a new delivery site. */
+export function siteRequestEmail(r: SiteRequestDetails): Email {
+  const subject = `New site requested: ${r.companyName} – ${r.siteName}`;
+  const intro = `${r.requestedBy} has asked for a new delivery site. Please add it to the customer's Delivery tab in Unleashed${r.customerCode ? ` (customer ${r.customerCode})` : ""}, using the site name below as the address name. The portal picks it up at the next site sync (or Site budgets → "Update sites from Unleashed now") and then applies the site code, budget and site managers below automatically.`;
+  const rows: [string, string | null | undefined][] = [
+    ["Site name", r.siteName],
+    ["Address", r.address.join(", ")],
+    ["Site code", r.siteCode],
+    ["Contact", [r.contactName, r.contactPhone].filter(Boolean).join(", ")],
+    ["Delivery notes", r.deliveryNotes],
+    ["Monthly budget", r.monthlyBudget != null ? money(r.monthlyBudget) + " ex GST" : null],
+    ["Site managers", r.managers?.length ? r.managers.join(", ") : null],
+  ];
+  const table = `<table style="font-size:14px;margin:8px 0">${rows.filter(([, v]) => v).map(([k, v]) => `<tr><td style="padding:3px 12px 3px 0;color:#777;white-space:nowrap;vertical-align:top">${k}</td><td style="padding:3px 0"><b>${esc(v)}</b></td></tr>`).join("")}</table>`;
+  return {
+    subject,
+    html: layout("New site requested", `<p>${esc(intro)}</p>${table}`),
+    text: `${intro}\n\n${rows.filter(([, v]) => v).map(([k, v]) => `${k}: ${v}`).join("\n")}`,
+  };
+}
+
+/** To the head-office admin: the site they asked for is now in the portal. */
+export function siteReadyEmail(p: { name: string; companyName: string; siteName: string; applied: string[] }): Email {
+  const subject = `Your new site is ready: ${p.siteName}`;
+  const intro = `Hi ${p.name}, the site "${p.siteName}" you asked for is now set up for ${p.companyName} in the trade portal and can be ordered for.`;
+  return {
+    subject,
+    html: layout("New site ready", `<p>${esc(intro)}</p>${p.applied.length ? `<p>${p.applied.map(esc).join("<br>")}</p>` : ""}`),
+    text: `${intro}${p.applied.length ? `\n\n${p.applied.join("\n")}` : ""}`,
+  };
+}
