@@ -1,5 +1,5 @@
 import type { ActionFunctionArgs, LoaderFunctionArgs } from "react-router";
-import { customerContext, json } from "../customer-auth.server";
+import { customerContext, handleCustomer, json } from "../customer-auth.server";
 import { budgetsView, openSites, saveSiteBudgets } from "../customer-budgets.server";
 import { closeSiteForCustomer } from "../sites.server";
 
@@ -7,7 +7,10 @@ import { closeSiteForCustomer } from "../sites.server";
 // Head-office admin only. GET ?quarter=FY2027-Q2&fy=FY2027&site=<location id>
 // POST { action: "save", site, values: { default|YYYY-MM: number|null } } | { action: "close", site, reason }
 
-export const loader = async ({ request }: LoaderFunctionArgs) => {
+export const loader = ({ request }: LoaderFunctionArgs) => handleCustomer(request, "budgets", () => budgetsLoader(request));
+export const action = ({ request }: ActionFunctionArgs) => handleCustomer(request, "budgets", () => budgetsAction(request));
+
+async function budgetsLoader(request: Request) {
   const c = await customerContext(request);
   if (!c.buyer) return c.cors(json({ trade: false }));
   if (!c.isAdmin) return c.cors(json({ trade: true, isAdmin: false, company: c.buyer.companyName }));
@@ -18,9 +21,9 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
     site: url.searchParams.get("site"),
   });
   return c.cors(json({ trade: true, isAdmin: true, company: c.buyer.companyName, ...view }));
-};
+}
 
-export const action = async ({ request }: ActionFunctionArgs) => {
+async function budgetsAction(request: Request) {
   const c = await customerContext(request);
   if (!c.buyer || !c.isAdmin) return c.cors(json({ error: "Only your head-office admin can change site budgets." }, 403));
   let body: { action?: string; site?: string; values?: Record<string, number | null>; reason?: string };
@@ -49,4 +52,4 @@ export const action = async ({ request }: ActionFunctionArgs) => {
   } catch (e) {
     return c.cors(json({ error: (e as Error).message }, 400));
   }
-};
+}

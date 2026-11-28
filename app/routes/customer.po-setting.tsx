@@ -1,5 +1,6 @@
 import type { ActionFunctionArgs, LoaderFunctionArgs } from "react-router";
 import { authenticate, unauthenticated } from "../shopify.server";
+import { handleCustomer } from "../customer-auth.server";
 import { graphqlFor, orderDeps } from "../orders.server";
 import { setPoNotRequired } from "../po-setting.server";
 import { BUYER_QUERY, BuyerError, buyerContext, type BuyerQueryData } from "../../src/b2b/buyer.ts";
@@ -28,7 +29,10 @@ async function isAdminOf(shopify: ReturnType<typeof graphqlFor>, companyId: stri
   return !!approver && !approver.isStaff && !!email && approver.email.toLowerCase() === email.toLowerCase();
 }
 
-export const loader = async ({ request }: LoaderFunctionArgs) => {
+export const loader = ({ request }: LoaderFunctionArgs) => handleCustomer(request, "po-setting", () => poLoader(request));
+export const action = ({ request }: ActionFunctionArgs) => handleCustomer(request, "po-setting", () => poAction(request));
+
+async function poLoader(request: Request) {
   const { cors, shopify, data } = await context(request);
   try {
     const buyer = buyerContext(data);
@@ -40,7 +44,7 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
   }
 };
 
-export const action = async ({ request }: ActionFunctionArgs) => {
+async function poAction(request: Request) {
   const { cors, shopify, data } = await context(request);
   let body: { notRequired?: boolean };
   try { body = await request.json(); } catch { return cors(json({ error: "Bad request" }, 400)); }

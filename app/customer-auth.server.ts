@@ -38,3 +38,33 @@ export async function customerContext(request: Request): Promise<CustomerContext
 export function json(body: unknown, status = 200) {
   return new Response(JSON.stringify(body), { status, headers: { "Content-Type": "application/json", "Cache-Control": "private, no-store" } });
 }
+
+/** Adds the cross-site headers the customer account extensions need (also to error replies). */
+export function withCors(request: Request, res: Response): Response {
+  const headers = new Headers(res.headers);
+  if (request.headers.get("Origin")) {
+    headers.set("Access-Control-Allow-Origin", "*");
+    headers.set("Access-Control-Allow-Headers", "Authorization, Content-Type");
+    headers.set("Access-Control-Allow-Methods", "GET, POST, OPTIONS");
+  }
+  return new Response(res.body, { status: res.status, statusText: res.statusText, headers });
+}
+
+/**
+ * Runs a customer-account backend handler so that every reply, including a rejected session token or
+ * a server error, reaches the extension readably (with CORS headers) and errors are logged.
+ */
+export async function handleCustomer(request: Request, what: string, fn: () => Promise<Response>): Promise<Response> {
+  if (request.method === "OPTIONS") return withCors(request, new Response(null, { status: 204 }));
+  try {
+    return withCors(request, await fn());
+  } catch (e) {
+    if (e instanceof Response) {
+      console.error(`[${what}] ${request.method} rejected: ${e.status} ${e.statusText}`);
+      const msg = e.status === 401 ? "Your session has expired. Please reload the page." : `Request failed (${e.status}).`;
+      return withCors(request, json({ error: msg }, e.status));
+    }
+    console.error(`[${what}] ${request.method} failed: ${(e as Error).stack}`);
+    return withCors(request, json({ error: `Sorry, something went wrong: ${(e as Error).message}` }, 500));
+  }
+}
