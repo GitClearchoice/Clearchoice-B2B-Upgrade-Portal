@@ -31,7 +31,7 @@ function PoSetting() {
     call('GET').then(setState).catch((e) => setError(e.message));
   }, []);
 
-  if (!state && !error) return null;
+  // Show the section straight away (with a loading line), so it's visible even while the app answers.
   if (state && !state.trade) return null;
 
   async function onChange(event) {
@@ -61,6 +61,7 @@ function PoSetting() {
             onChange={onChange}
           />
         )}
+        {!state && !error && <s-text color="subdued">Loading…</s-text>}
         {state && (
           <s-text color="subdued">
             {state.notRequired
