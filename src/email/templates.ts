@@ -112,24 +112,31 @@ export function awaitingApprovalEmail(o: OrderSummary, approverName: string): Em
 
 export function approvalRequestEmail(o: OrderSummary, b: BudgetLine, approverName: string, links: { review: string }): Email {
   const subject = `Approval needed: ${o.siteName} order over budget (PO ${o.poNumber})`;
-  const intro = `Hi ${approverName}, ${o.buyerName} has placed an order for ${o.siteName} that would take the site over its monthly budget. Please approve or decline it.`;
+  const intro = `Hi ${approverName}, ${o.buyerName} has placed an order for ${o.siteName} that would take the site over its monthly budget. Please review it: you can change quantities or remove items, then approve or decline.`;
+  const poNote = needsPo(o.poNumber) ? `The buyer doesn't have a PO number yet. You can enter one on the review page when you approve.` : "";
   const button = `<p style="margin:20px 0"><a href="${esc(links.review)}" style="display:inline-block;background:${BRAND};color:#fff;font-weight:bold;font-size:16px;text-decoration:none;padding:12px 24px;border-radius:6px">Review order</a></p>`;
   return {
     subject,
-    html: layout("Order needs your approval", `<p>${esc(intro)}</p>${budgetHtml(b, o.goodsExGst)}${button}${detailsHtml(o)}${linesHtml(o)}<p style="font-size:12px;color:#777">If the button doesn't work, copy this link into your browser:<br><span style="word-break:break-all">${esc(links.review)}</span></p>`),
-    text: `${intro}\n\n${budgetText(b, o.goodsExGst)}\n\nReview and approve or decline: ${links.review}\n\n${detailsText(o)}\n\n${linesText(o)}`,
+    html: layout("Order needs your approval", `<p>${esc(intro)}</p>${poNote ? `<p style="background:#fff8e1;border-left:4px solid #f0b400;padding:10px 12px;font-size:14px"><b>No PO yet.</b> ${esc(poNote.replace(/^The buyer doesn't have a PO number yet\. /, "The buyer doesn't have a PO number. "))}</p>` : ""}${budgetHtml(b, o.goodsExGst)}${button}${detailsHtml(o)}${linesHtml(o)}<p style="font-size:12px;color:#777">If the button doesn't work, copy this link into your browser:<br><span style="word-break:break-all">${esc(links.review)}</span></p>`),
+    text: `${intro}${poNote ? `\n\n${poNote}` : ""}\n\n${budgetText(b, o.goodsExGst)}\n\nReview and approve or decline: ${links.review}\n\n${detailsText(o)}\n\n${linesText(o)}`,
   };
 }
 
-export function approvedEmail(o: OrderSummary, approverName: string): Email {
-  const subject = `Approved: PO ${o.poNumber} for ${o.siteName}`;
-  const intro = `Good news: ${approverName} approved your order. It's on its way to our team.`;
+export function approvedEmail(o: OrderSummary, approverName: string, changes: string[] = []): Email {
+  const subject = `Approved${changes.length ? " with changes" : ""}: PO ${o.poNumber} for ${o.siteName}`;
+  const intro = changes.length
+    ? `${approverName} approved your order with some changes (below). It's on its way to our team.`
+    : `Good news: ${approverName} approved your order. It's on its way to our team.`;
+  const changeHtml = changes.length ? `<p style="background:#fff8e1;border-left:4px solid #f0b400;padding:10px 12px;font-size:14px"><b>Changes:</b><br>${changes.map(esc).join("<br>")}</p>` : "";
   return {
     subject,
-    html: layout("Order approved", `<p>${esc(intro)}</p>${detailsHtml(o)}${linesHtml(o)}`),
-    text: `${intro}\n\n${detailsText(o)}\n\n${linesText(o)}`,
+    html: layout(changes.length ? "Order approved with changes" : "Order approved", `<p>${esc(intro)}</p>${changeHtml}${detailsHtml(o)}${linesHtml(o)}`),
+    text: `${intro}\n${changes.length ? `\nChanges:\n${changes.map((c) => `- ${c}`).join("\n")}\n` : ""}\n${detailsText(o)}\n\n${linesText(o)}`,
   };
 }
+
+/** True when the buyer had no PO and asked for it to be requested ("PO REQUIRED - <name>"). */
+export const needsPo = (po: string) => /^PO REQUIRED\b/i.test(po.trim());
 
 export function rejectedEmail(o: OrderSummary, approverName: string, reason: string | null): Email {
   const subject = `Declined: PO ${o.poNumber} for ${o.siteName}`;

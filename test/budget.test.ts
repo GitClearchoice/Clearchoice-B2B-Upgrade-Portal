@@ -4,7 +4,7 @@ import { MemoryStore } from "../src/sync/store.ts";
 import type { BuyerContext } from "../src/b2b/buyer.ts";
 import { budgetStatus, needsApproval, sydneyMonth, sydneyMonthRange, type BudgetRepo } from "../src/orders/budget.ts";
 import { approvalToken, verifyApprovalToken } from "../src/orders/approvalToken.ts";
-import { decideOrder } from "../src/orders/approval.ts";
+import { decideOrder, reviseOrder } from "../src/orders/approval.ts";
 import { UnleashedError } from "../src/unleashed/client.ts";
 import type { EmailMessage } from "../src/email/postmark.ts";
 import {
@@ -105,6 +105,7 @@ let budgets: MemBudgets;
 let emails: EmailMessage[];
 let posts: any[];
 let tags: { add: string[]; remove: string[] };
+let drafts: any[];
 let adminMetafield: string | null;
 let staffEmail: string | null;
 let unleashedFails: number;
@@ -133,6 +134,7 @@ function deps(): OrderDeps {
       if (query.includes("BudgetApprover")) {
         return { company: { admin: adminMetafield ? { value: adminMetafield } : null, mainContact: null } } as T;
       }
+      if (query.includes("ReviseDraft")) { drafts.push(vars); return { draftOrderUpdate: { userErrors: [] } } as T; }
       if (query.includes("UntagDraft")) { tags.remove.push(...vars.tags); return {} as T; }
       if (query.includes("TagDraft")) { tags.add.push(...vars.tags); return {} as T; }
       throw new Error(`unexpected query ${query.slice(0, 60)}`);
@@ -164,6 +166,7 @@ beforeEach(async () => {
   emails = [];
   posts = [];
   tags = { add: [], remove: [] };
+  drafts = [];
   adminMetafield = "gid://shopify/CompanyContact/1";
   staffEmail = "orders@clearchoice.example";
   unleashedFails = 0;
@@ -300,4 +303,46 @@ test("months and quarters", async () => {
   assert.deepEqual(parseQuarter("FY2027-Q3")!.months, ["2027-01", "2027-02", "2027-03"]);
   assert.equal(parseQuarter("FY2027-Q4")!.label, "Q4 FY2027 (Apr–Jun 2027)");
   assert.equal(parseQuarter("2027-Q1"), null);
+});
+
+test("approver adds the PO and changes quantities: re-priced, draft updated, sent once with the changes", async () => {
+  budgets.budgets.set(`${SITE}|default`, 10);
+  const r = await order(5, { poNumber: "PO REQUIRED - William Smith" }); // $40, over $10
+  emails = [];
+  const d = await decideOrder(deps(), r.orderId, "approve", null, { poNumber: "4500123", quantities: { 0: 2 } });
+  assert.equal(d.order.status, "sent");
+  assert.deepEqual(d.changes, ["PO number added: 4500123", "Nitrile gloves: quantity 5 → 2", "New goods total $16.00 ex GST (was $40.00)"]);
+  assert.equal(posts.length, 1);
+  assert.equal(posts[0].CustomerRef, "4500123");
+  assert.deepEqual(posts[0].SalesOrderLines.map((l: any) => [l.OrderQuantity, l.UnitPrice, l.LineTotal, l.LineTax]), [[2, 8, 16, 1.6]]);
+  assert.equal(posts[0].SubTotal, 16);
+  assert.equal(posts[0].Total, 17.6);
+  assert.equal(drafts[0].input.poNumber, "4500123");
+  assert.equal(drafts[0].input.lineItems[0].quantity, 2);
+  assert.ok(tags.add.includes("changed-by-approver"));
+  const rec = repo.rows.get(r.orderId)!;
+  assert.equal(rec.goodsExGst, 16);
+  assert.match(rec.decisionNote!, /Changed by approver: PO number added/);
+  assert.match(emails[0]!.subject, /Approved with changes: PO 4500123/);
+  assert.match(emails[0]!.text, /quantity 5 → 2/);
+});
+
+test("approval email flags a missing PO", async () => {
+  budgets.budgets.set(`${SITE}|default`, 10);
+  await order(5, { poNumber: "PO REQUIRED - William Smith" });
+  assert.match(emails[0]!.text, /doesn't have a PO number yet/);
+});
+
+test("update without approving keeps it waiting; removing every item is refused", async () => {
+  budgets.budgets.set(`${SITE}|default`, 10);
+  const r = await order(5);
+  const rec = repo.rows.get(r.orderId)!;
+  const u = await reviseOrder(deps(), rec, { quantities: { 0: 3 } });
+  assert.equal(repo.rows.get(r.orderId)!.status, "awaiting-approval");
+  assert.equal(repo.rows.get(r.orderId)!.goodsExGst, 24);
+  assert.equal(posts.length, 0);
+  assert.equal(u.changes.length, 2);
+  await assert.rejects(reviseOrder(deps(), repo.rows.get(r.orderId)!, { quantities: { 0: 0 } }), /decline the order instead/);
+  const same = await reviseOrder(deps(), repo.rows.get(r.orderId)!, { quantities: { 0: 3 }, poNumber: "" });
+  assert.deepEqual(same.changes, []);
 });

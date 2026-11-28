@@ -3,7 +3,9 @@ import { Form, useActionData, useLoaderData, useNavigation } from "react-router"
 import { unauthenticated } from "../shopify.server";
 import { graphqlFor, orderDeps, orderRepo } from "../orders.server";
 import { verifyApprovalToken } from "../../src/orders/approvalToken.ts";
-import { decideOrder } from "../../src/orders/approval.ts";
+import { decideOrder, reviseOrder, type Revision } from "../../src/orders/approval.ts";
+import { OrderError } from "../../src/orders/placeOrder.ts";
+import { needsPo } from "../../src/email/templates.ts";
 import { monthLabel, sydneyMonth } from "../../src/orders/budget.ts";
 
 // The head-office admin's approve/decline page, opened from the approval email.
@@ -43,6 +45,7 @@ export const loader = async ({ params, request }: LoaderFunctionArgs) => {
       placed: new Date(o.createdAt).toLocaleString("en-AU", { timeZone: "Australia/Sydney", dateStyle: "medium", timeStyle: "short" }),
       decisionNote: o.decisionNote,
       unleashedOrderNumber: o.unleashedOrderNumber,
+      needsPo: needsPo(o.poNumber),
     },
   };
 };
@@ -50,14 +53,36 @@ export const loader = async ({ params, request }: LoaderFunctionArgs) => {
 export const action = async ({ params, request }: ActionFunctionArgs) => {
   const form = await request.formData();
   const token = String(form.get("t") ?? "");
-  const decision = form.get("decision") === "approve" ? "approve" : form.get("decision") === "reject" ? "reject" : null;
-  if (!decision) return { error: "Choose approve or decline." };
+  const intent = String(form.get("decision") ?? "");
+  if (!["approve", "reject", "update"].includes(intent)) return { error: "Choose approve, update or decline." };
   const r = await load(params.id ?? "", token);
   if ("error" in r) return { error: r.error };
+
+  // The approver's changes: PO number and a quantity per line (0 removes it).
+  const rev: Revision = { poNumber: String(form.get("poNumber") ?? ""), quantities: {} };
+  r.order.lines.forEach((_, i) => {
+    const raw = form.get(`qty${i}`);
+    if (raw !== null && String(raw).trim() !== "") rev.quantities![i] = Number(String(raw).trim());
+  });
+
   const { admin } = await unauthenticated.admin(r.order.shop);
-  const result = await decideOrder(orderDeps(graphqlFor(admin)), r.order.id, decision, String(form.get("reason") ?? ""));
-  if (!result.changed) return { done: `This order was already ${describe(result.order.status)}.` };
-  return { done: decision === "approve" ? "Approved. The order has been sent to Clearchoice and the buyer has been emailed." : "Declined. The buyer has been emailed." };
+  const deps = orderDeps(graphqlFor(admin));
+  try {
+    if (intent === "update") {
+      if (r.order.status !== "awaiting-approval") return { done: `This order was already ${describe(r.order.status)}.` };
+      const { changes } = await reviseOrder(deps, r.order, rev);
+      return { updated: changes.length ? `Order updated: ${changes.join("; ")}. Approve it when you're ready.` : "Nothing changed." };
+    }
+    const result = await decideOrder(deps, r.order.id, intent as "approve" | "reject", String(form.get("reason") ?? ""), intent === "approve" ? rev : undefined);
+    if (!result.changed) return { done: `This order was already ${describe(result.order.status)}.` };
+    if (intent === "reject") return { done: "Declined. The buyer has been emailed." };
+    return {
+      done: `Approved${result.changes?.length ? " with your changes" : ""}. The order has been sent to Clearchoice and the buyer has been emailed.`,
+    };
+  } catch (e) {
+    if (e instanceof OrderError) return { error: e.message };
+    throw e;
+  }
 };
 
 function describe(status: string) {
@@ -108,37 +133,82 @@ export default function Approval() {
           </div>
         )}
 
-        {/* Two columns so it fits a phone: product with "qty × unit price" underneath, and the line total. */}
-        <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 14, margin: "12px 0" }}>
-          <thead><tr><th style={{ ...cell, textAlign: "left" }}>Product</th><th style={num}>Total ex GST</th></tr></thead>
-          <tbody>
-            {o.lines.map((l, i) => (
-              <tr key={i}>
-                <td style={cell}><b>{l.title || l.sku}</b><br /><small style={{ color: "#777" }}>{l.sku}</small><br /><span style={{ fontSize: 13 }}>{l.quantity} × {money(l.unitExGst)} ex GST</span></td>
-                <td style={{ ...num, verticalAlign: "top" }}>{money(l.lineExGst)}</td>
-              </tr>
-            ))}
-            <tr><td style={{ ...num, fontWeight: 700 }}>Goods total ex GST</td><td style={{ ...num, fontWeight: 700 }}>{money(o.goodsExGst)}</td></tr>
-          </tbody>
-        </table>
-
         {result && "error" in result && <p style={{ color: RED, fontWeight: 700 }}>{result.error}</p>}
+        {result && "updated" in result && <p style={{ background: "#fff8e1", borderLeft: "4px solid #f0b400", padding: "10px 12px", fontSize: 15 }}>{result.updated}</p>}
         {result && "done" in result && <p style={{ fontSize: 16, fontWeight: 700 }}>{result.done}</p>}
 
         {waiting ? (
-          <Form method="post">
+          // Re-mounted whenever the order changes, so the boxes always match the current lines.
+          <Form method="post" key={o.lines.map((l) => `${l.variantId}:${l.quantity}`).join(",") + "|" + o.poNumber}>
             <input type="hidden" name="t" value={data.token} />
-            <label style={{ display: "block", margin: "16px 0 8px", fontSize: 15 }}>
+
+            <label style={{ display: "block", margin: "16px 0 8px", fontSize: 15, fontWeight: 600 }}>
+              Purchase order number
+              {o.needsPo && <span style={{ display: "block", fontWeight: 400, fontSize: 14, color: "#8a5a00", marginTop: 4 }}>The buyer doesn't have a PO number yet ({o.poNumber}). Enter it here if you have it.</span>}
+              <input
+                name="poNumber"
+                defaultValue={o.needsPo ? "" : o.poNumber}
+                placeholder={o.needsPo ? "Enter the PO number" : ""}
+                maxLength={100}
+                style={{ display: "block", width: "100%", marginTop: 6, padding: 10, font: "inherit", boxSizing: "border-box", border: "1px solid #999", borderRadius: 6 }}
+              />
+            </label>
+
+            {/* Two columns so it fits a phone: product with quantity box and unit price, and the line total. */}
+            <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 14, margin: "12px 0" }}>
+              <thead><tr><th style={{ ...cell, textAlign: "left" }}>Product</th><th style={num}>Total ex GST</th></tr></thead>
+              <tbody>
+                {o.lines.map((l, i) => (
+                  <tr key={i}>
+                    <td style={cell}>
+                      <b>{l.title || l.sku}</b><br /><small style={{ color: "#777" }}>{l.sku}</small>
+                      <div style={{ display: "flex", alignItems: "center", gap: 8, marginTop: 6, flexWrap: "wrap" }}>
+                        <label style={{ fontSize: 13 }}>
+                          Qty{" "}
+                          <input name={`qty${i}`} type="number" inputMode="numeric" min={0} max={100000} defaultValue={l.quantity}
+                            style={{ width: 72, padding: "6px 8px", font: "inherit", border: "1px solid #999", borderRadius: 6 }} />
+                        </label>
+                        <span style={{ fontSize: 13 }}>× {money(l.unitExGst)} ex GST</span>
+                      </div>
+                    </td>
+                    <td style={{ ...num, verticalAlign: "top" }}>{money(l.lineExGst)}</td>
+                  </tr>
+                ))}
+                <tr><td style={{ ...num, fontWeight: 700 }}>Goods total ex GST</td><td style={{ ...num, fontWeight: 700 }}>{money(o.goodsExGst)}</td></tr>
+              </tbody>
+            </table>
+            <p style={{ fontSize: 13, color: "#555", marginTop: 0 }}>
+              To change the order, edit the quantities (0 removes an item) and tap <b>Update totals</b> to see the new prices,
+              or just tap <b>Approve order</b> to approve it with your changes. Quantity prices are worked out again.
+            </p>
+
+            <div style={{ display: "flex", flexWrap: "wrap", gap: 12, marginTop: 12 }}>
+              <button type="submit" name="decision" value="approve" disabled={busy} style={btn(RED)}>Approve order</button>
+              <button type="submit" name="decision" value="update" disabled={busy} style={btn("#1f5fa8")}>Update totals</button>
+            </div>
+
+            <label style={{ display: "block", margin: "20px 0 8px", fontSize: 15 }}>
               Note to the buyer (optional, shown if you decline)
               <textarea name="reason" rows={3} maxLength={500} style={{ display: "block", width: "100%", marginTop: 6, padding: 8, font: "inherit", boxSizing: "border-box" }} />
             </label>
-            <div style={{ display: "flex", flexWrap: "wrap", gap: 12, marginTop: 12 }}>
-              <button type="submit" name="decision" value="approve" disabled={busy} style={btn(RED)}>Approve order</button>
-              <button type="submit" name="decision" value="reject" disabled={busy} style={btn("#555")}>Decline</button>
-            </div>
+            <button type="submit" name="decision" value="reject" disabled={busy} style={btn("#555")}>Decline</button>
           </Form>
         ) : (
-          !(result && "done" in result) && <p style={{ fontSize: 16 }}>This order has been <b>{describe(o.status)}</b>{o.decisionNote ? ` (${o.decisionNote})` : ""}.</p>
+          <>
+            <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 14, margin: "12px 0" }}>
+              <thead><tr><th style={{ ...cell, textAlign: "left" }}>Product</th><th style={num}>Total ex GST</th></tr></thead>
+              <tbody>
+                {o.lines.map((l, i) => (
+                  <tr key={i}>
+                    <td style={cell}><b>{l.title || l.sku}</b><br /><small style={{ color: "#777" }}>{l.sku}</small><br /><span style={{ fontSize: 13 }}>{l.quantity} × {money(l.unitExGst)} ex GST</span></td>
+                    <td style={{ ...num, verticalAlign: "top" }}>{money(l.lineExGst)}</td>
+                  </tr>
+                ))}
+                <tr><td style={{ ...num, fontWeight: 700 }}>Goods total ex GST</td><td style={{ ...num, fontWeight: 700 }}>{money(o.goodsExGst)}</td></tr>
+              </tbody>
+            </table>
+            {!(result && "done" in result) && <p style={{ fontSize: 16 }}>This order has been <b>{describe(o.status)}</b>{o.decisionNote ? ` (${o.decisionNote})` : ""}.</p>}
+          </>
         )}
       </div>
     </div>

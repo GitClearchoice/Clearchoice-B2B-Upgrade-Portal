@@ -90,3 +90,47 @@ export function buildSalesOrder(o: TradeOrderInput) {
     Total: money(subC + taxC),
   };
 }
+
+type SalesOrderPayload = ReturnType<typeof buildSalesOrder>;
+
+/**
+ * The same sales order with new lines (and optionally a new PO), totals worked out again. Used when the
+ * head-office admin changes an order before approving it. Keeps everything else (customer, site,
+ * warehouse, tax, Guid) as it was.
+ */
+export function reviseSalesOrder(
+  payload: SalesOrderPayload,
+  lines: ResolvedPrice[],
+  taxable: (productCode: string) => boolean,
+  poNumber?: string,
+): SalesOrderPayload {
+  if (!lines.length) throw new Error("A sales order needs at least one line");
+  const taxCode = payload.Tax.TaxCode;
+  const taxRate = payload.TaxRate;
+  let subC = 0;
+  let taxC = 0;
+  const SalesOrderLines = lines.map((l, i) => {
+    const lineC = cents(l.lineExGst);
+    const lineTaxC = taxable(l.productCode) ? Math.round(lineC * taxRate) : 0;
+    subC += lineC;
+    taxC += lineTaxC;
+    return {
+      LineNumber: i + 1,
+      Product: { ProductCode: l.productCode },
+      OrderQuantity: l.quantity,
+      UnitPrice: l.unitExGst,
+      DiscountRate: 0,
+      LineTotal: money(lineC),
+      LineTax: money(lineTaxC),
+      LineTaxCode: taxable(l.productCode) ? taxCode : undefined,
+    };
+  });
+  return {
+    ...payload,
+    ...(poNumber?.trim() ? { CustomerRef: poNumber.trim().slice(0, 500) } : {}),
+    SalesOrderLines,
+    SubTotal: money(subC),
+    TaxTotal: money(taxC),
+    Total: money(subC + taxC),
+  };
+}

@@ -87,6 +87,8 @@ Upload this file to the new Claude project, then start a chat with:
 
 **No PO yet (28 Nov):** Trade order block has "I don't have a PO number yet": the PO field becomes "Your first and last name" (prefilled with the buyer's name) and the order goes to Unleashed with Customer Reference **"PO REQUIRED - <name>"**, so staff know to request the PO. Search/collection product cards also show the quantity breaks under the trade price.
 
+**Approver can add the PO and change the order (28 Nov):** the Review order page has a **Purchase order number** box (empty with a note when the buyer sent "PO REQUIRED - <name>") and a quantity box per item (0 removes it). **Update totals** re-prices and saves without approving; **Approve order** applies any changes and sends. Changes re-price through the engine (quantity breaks apply), rewrite the saved Unleashed payload (`reviseSalesOrder`) and the Shopify draft (`draftOrderUpdate`), tag `changed-by-approver`, and the buyer's email is "Approved with changes" listing them. Removing every item is refused (decline instead). The approval email flags a missing PO. Emails themselves can't hold forms (mail apps strip them), so all of this is on the page the email links to.
+
 **Phase 4 next:**
 1. You: Postmark account → add sender signature / domain **clearchoiceproducts.com**, add its DKIM and Return-Path DNS records, create a Server and copy its **Server API token**.
 2. You: on Render, web service → Environment: `POSTMARK_SERVER_TOKEN` (the token) and `STAFF_EMAIL` (who gets failed orders). Blueprint → Manual Sync if the new keys don't appear. (Until the token is set, emails only go to the Render log.)
