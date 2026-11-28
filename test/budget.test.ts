@@ -382,3 +382,16 @@ test("daily PO REQUIRED summary email lists each order with days waiting", async
   assert.equal(needsPo("NO PO REQUIRED - Pat"), false); // companies without POs aren't chased
   assert.equal(needsPo("PO TO FOLLOW - Pat"), true);
 });
+
+test("Australian financial years", async () => {
+  const { financialYearOf, parseFinancialYear } = await import("../src/orders/budget.ts");
+  const fy = financialYearOf("2026-11");
+  assert.equal(fy.key, "FY2027");
+  assert.equal(fy.label, "FY2027 (Jul 2026 – Jun 2027)");
+  assert.equal(fy.months[0], "2026-07");
+  assert.equal(fy.months[11], "2027-06");
+  assert.equal(financialYearOf("2027-06").key, "FY2027");
+  assert.equal(financialYearOf("2027-07").key, "FY2028");
+  assert.equal(parseFinancialYear("FY2026")!.months[0], "2025-07");
+  assert.equal(parseFinancialYear("2026"), null);
+});

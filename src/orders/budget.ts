@@ -113,3 +113,27 @@ export function parseQuarter(key: string | null | undefined): Quarter | null {
   const m = /^FY(\d{4})-Q([1-4])$/.exec(key ?? "");
   return m ? quarterOf(addMonths(`${Number(m[1]) - 1}-07`, (Number(m[2]) - 1) * 3)) : null;
 }
+
+/** Australian financial year (1 Jul – 30 Jun), named by the year it ends: "FY2027" = Jul 2026 – Jun 2027. */
+export interface FinancialYear {
+  key: string;
+  label: string;
+  months: string[]; // 12 x "YYYY-MM", Jul … Jun
+}
+
+export function financialYearOf(month: string): FinancialYear {
+  const [y, m] = month.split("-").map(Number) as [number, number];
+  const fy = m >= 7 ? y + 1 : y;
+  return financialYear(fy);
+}
+
+export function financialYear(fy: number): FinancialYear {
+  const months = Array.from({ length: 12 }, (_, i) => addMonths(`${fy - 1}-07`, i));
+  return { key: `FY${fy}`, label: `FY${fy} (Jul ${fy - 1} – Jun ${fy})`, months };
+}
+
+/** Parses "FY2027"; null if it isn't one. */
+export function parseFinancialYear(key: string | null | undefined): FinancialYear | null {
+  const m = /^FY(\d{4})$/.exec(key ?? "");
+  return m ? financialYear(Number(m[1])) : null;
+}

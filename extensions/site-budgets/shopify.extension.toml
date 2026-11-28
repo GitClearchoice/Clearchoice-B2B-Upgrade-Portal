@@ -1,0 +1,18 @@
+# Customer account page "Site budgets" for the company's head-office admin (phase 5): approvals
+# waiting, this quarter's budgets per site (edit, close a site), financial-year summary and order
+# history with CSV. Backend: /customer/budgets on the app. Add it to the customer account menu
+# (Content → Menus → Customer account main menu → add the "Site budgets" app page).
+api_version = "2026-01"
+
+[[extensions]]
+name = "Site budgets"
+handle = "site-budgets"
+type = "ui_extension"
+
+  [[extensions.targeting]]
+  module = "./src/SiteBudgets.jsx"
+  target = "customer-account.page.render"
+
+  [extensions.capabilities]
+  # Calls the app's own backend (https://clearchoice-b2b.onrender.com).
+  network_access = true
