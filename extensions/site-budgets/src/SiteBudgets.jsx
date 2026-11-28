@@ -1,14 +1,28 @@
 import '@shopify/ui-extensions/preact';
 import { render } from 'preact';
-import { useEffect, useState } from 'preact/hooks';
+import { useEffect, useErrorBoundary, useState } from 'preact/hooks';
 
 // The app's backend (Render web service). Keep in step with application_url in shopify.app.toml.
 const APP_URL = 'https://clearchoice-b2b.onrender.com';
 const PAGE_SIZE = 25;
 
 export default async () => {
-  render(<SiteBudgets />, document.body);
+  render(<Safe />, document.body);
 };
+
+// If anything on the page fails, show the error instead of Shopify's "problem loading this page".
+function Safe() {
+  const [err, reset] = useErrorBoundary((e) => console.error('Site budgets:', e));
+  if (err) {
+    return (
+      <s-page heading="Site budgets">
+        <s-banner tone="critical">Sorry, something went wrong on this page: {String(err && err.message ? err.message : err)}</s-banner>
+        <s-button variant="secondary" onClick={reset}>Try again</s-button>
+      </s-page>
+    );
+  }
+  return <SiteBudgets />;
+}
 
 const money = (n) => '$' + Number(n || 0).toLocaleString('en-AU', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
 const date = (iso) => new Date(iso).toLocaleDateString('en-AU', { day: 'numeric', month: 'short', year: 'numeric' });
@@ -34,11 +48,11 @@ function SiteBudgets() {
 
   function load(next = params) {
     setLoading(true);
-    const q = new URLSearchParams();
-    if (next.quarter) q.set('quarter', next.quarter);
-    if (next.fy) q.set('fy', next.fy);
-    if (next.site) q.set('site', next.site);
-    return api('GET', `/customer/budgets?${q}`)
+    const q = [['quarter', next.quarter], ['fy', next.fy], ['site', next.site]]
+      .filter(([, v]) => v)
+      .map(([k, v]) => `${k}=${encodeURIComponent(v)}`)
+      .join('&');
+    return api('GET', `/customer/budgets${q ? `?${q}` : ''}`)
       .then((d) => { setData(d); setError(''); })
       .catch((e) => setError(e.message))
       .finally(() => setLoading(false));
