@@ -85,7 +85,7 @@ export default function Index() {
           <input type="hidden" name="intent" value="test-email" />
           <s-button type="submit" variant="secondary">Send test email</s-button>
         </Form>
-        {result && "emailTest" in result && <s-banner tone={result.emailTest.ok ? "success" : "critical"}>{result.emailTest.text}</s-banner>}
+        {result && "emailTest" in result && result.emailTest && <s-banner tone={result.emailTest.ok ? "success" : "critical"}>{result.emailTest.text}</s-banner>}
       </s-section>
 
       <s-section heading="Orders waiting for a PO">
