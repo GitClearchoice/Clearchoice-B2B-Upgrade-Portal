@@ -3,6 +3,7 @@
 # can only be placed when the store has a B2B market, so this uses the Profile block target). Head-office admin can tick "We don't use purchase orders" (same company setting as
 # the cart tick box); other buyers see the current setting. Backend: /customer/po-setting on the app.
 api_version = "2026-01"
+uid = "fd0fc64d-2ae4-82f6-64d4-025bd3a47ba982fa382a"
 
 [[extensions]]
 name = "Purchase orders"
