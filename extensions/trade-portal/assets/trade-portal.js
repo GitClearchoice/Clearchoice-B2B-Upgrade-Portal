@@ -143,6 +143,27 @@
     var errEl = el.querySelector("[data-cc-error]");
     var submitEl = el.querySelector("[data-cc-submit]");
     var poEl = el.querySelector("[data-cc-po]");
+    var noPoEl = el.querySelector("[data-cc-no-po]");
+    var poLabelEl = el.querySelector("[data-cc-po-label]");
+    var poHelpEl = el.querySelector("[data-cc-po-help]");
+    var poRequiredMark = poRequired ? " *" : "";
+    // No PO yet: the buyer enters their first and last name instead, and the order goes to Clearchoice
+    // with Customer Reference "PO TO FOLLOW - <name>" so staff know to request the PO.
+    if (noPoEl) {
+      noPoEl.addEventListener("change", function () {
+        var on = noPoEl.checked;
+        poLabelEl.textContent = (on ? "Your first and last name" : "PO number") + poRequiredMark;
+        if (poHelpEl) poHelpEl.hidden = !on;
+        poEl.value = on ? (el.dataset.buyerName || "") : "";
+        poEl.placeholder = on ? "First and last name" : "";
+        poEl.focus();
+      });
+    }
+    function poValue() {
+      var v = poEl.value.trim();
+      if (noPoEl && noPoEl.checked) return v ? ("PO TO FOLLOW - " + v).slice(0, 100) : "";
+      return v;
+    }
     var budgetEl = el.querySelector("[data-cc-budget]");
     var buttonLabel = "Place order";
     var budget = null; // this month's site budget from the app, or null
@@ -333,8 +354,9 @@
 
     function submit() {
       if (busy || !priced) return;
-      var po = poEl.value.trim();
-      if (poRequired && !po) { showError("Please enter a PO number."); poEl.focus(); return; }
+      var po = poValue();
+      if (noPoEl && noPoEl.checked && !poEl.value.trim()) { showError("Please enter your first and last name so we can request the PO."); poEl.focus(); return; }
+      if (poRequired && !po) { showError("Please enter a PO number, or tick \"I don't have a PO number yet\"."); poEl.focus(); return; }
       showError("");
       busy = true;
       submitEl.disabled = true;
@@ -471,7 +493,7 @@
       var chunks = [];
       for (var i = 0; i < todo.length; i += 40) chunks.push(todo.slice(i, i + 40));
       return Promise.all(chunks.map(function (chunk) {
-        return fetchPrices(proxy, location, chunk.map(function (k) { return { sku: k, quantity: 1 }; }))
+        return fetchPrices(proxy, location, chunk.map(function (k) { return { sku: k, quantity: 1 }; }), true)
           .then(function (body) {
             chunk.forEach(function (k) { priceCache[k] = null; });
             (body.lines || []).forEach(function (l) { priceCache[l.sku] = l; });
@@ -486,7 +508,9 @@
       if (!prices.length) return null;
       var min = Math.min.apply(null, prices);
       var from = prices.some(function (p) { return p !== min; });
-      return (from ? "From " : "") + money(min) + " <small>ex GST</small>";
+      // Quantity breaks under the price (single-price products; for mixed variants see the product page).
+      var one = list.length === 1 ? priceCache[list[0].sku] : null;
+      return (from ? "From " : "") + money(min) + " <small>ex GST</small>" + (one ? breaksHtml(one.breaks, 0) : "");
     }
 
     function scan() {

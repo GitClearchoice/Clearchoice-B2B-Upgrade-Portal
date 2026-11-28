@@ -9,6 +9,7 @@
     data-proxy="/apps/b2b"
     data-location="{{ customer.current_location.id }}"
     data-po-required="{{ block.settings.po_required }}"
+    data-buyer-name="{{ customer.first_name | append: ' ' | append: customer.last_name | strip | escape }}"
     {{ block.shopify_attributes }}
   >
     <h2 class="cc-trade-order__heading">{{ block.settings.heading }}</h2>
@@ -75,9 +76,14 @@
     {%- endcomment -%}
     <div class="cc-trade-order__form" data-cc-form>
       <label>
-        PO number{% if block.settings.po_required %} *{% endif %}
-        <input type="text" data-cc-po maxlength="100" autocomplete="off" {% if block.settings.po_required %}aria-required="true"{% endif %}>
+        <span data-cc-po-label>PO number{% if block.settings.po_required %} *{% endif %}</span>
+        <input type="text" data-cc-po maxlength="80" autocomplete="off" {% if block.settings.po_required %}aria-required="true"{% endif %}>
       </label>
+      <label class="cc-trade-order__no-po">
+        <input type="checkbox" data-cc-no-po>
+        I don't have a PO number yet
+      </label>
+      <p class="cc-trade-order__po-help" data-cc-po-help hidden>Enter your first and last name. We'll send the order through and request the PO number from you.</p>
       <label>
         <span class="cc-trade-order__label-one-line">Delivery note (Phone Number / Delivery hours)</span>
         <textarea data-cc-note maxlength="500" rows="3"></textarea>

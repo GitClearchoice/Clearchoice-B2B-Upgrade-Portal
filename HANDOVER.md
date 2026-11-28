@@ -85,6 +85,8 @@ Upload this file to the new Claude project, then start a chat with:
 
 **Mobile (28 Nov):** checked at 360px and 390px. Cart lines stack on phones below 750px (scoped CSS with !important to beat theme table styles), full-width Place order button, quantity breaks on their own line under the theme's quantity row, two-column order lists in emails and on the approval page. Site budgets (staff, Shopify admin) left desktop-first. Phase 5 customer page to be designed for phones from the start.
 
+**No PO yet (28 Nov):** Trade order block has "I don't have a PO number yet": the PO field becomes "Your first and last name" (prefilled with the buyer's name) and the order goes to Unleashed with Customer Reference **"PO TO FOLLOW - <name>"**, so staff know to request the PO. Search/collection product cards also show the quantity breaks under the trade price.
+
 **Phase 4 next:**
 1. You: Postmark account → add sender signature / domain **clearchoiceproducts.com**, add its DKIM and Return-Path DNS records, create a Server and copy its **Server API token**.
 2. You: on Render, web service → Environment: `POSTMARK_SERVER_TOKEN` (the token) and `STAFF_EMAIL` (who gets failed orders). Blueprint → Manual Sync if the new keys don't appear. (Until the token is set, emails only go to the Render log.)
