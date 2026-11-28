@@ -1,6 +1,7 @@
 import type { ActionFunctionArgs, HeadersFunction, LoaderFunctionArgs } from "react-router";
 import { useState } from "react";
-import { Form, useActionData, useLoaderData, useNavigation, useSearchParams } from "react-router";
+import { Form, useActionData, useLoaderData, useNavigation, useSearchParams, useSubmit } from "react-router";
+import { saveSiteBudgets } from "../customer-budgets.server";
 import { boundary } from "@shopify/shopify-app-react-router/server";
 import { authenticate } from "../shopify.server";
 import prisma from "../db.server";
@@ -204,6 +205,32 @@ export const action = async ({ request }: ActionFunctionArgs) => {
       return { error: `Unleashed check failed: ${(e as Error).message}` };
     }
   }
+  if (intent === "import") {
+    // Rows from an uploaded budgets CSV (parsed in the browser): match sites by Site ID, else by name.
+    let rows: { siteId?: string; site?: string; values: Record<string, number | null> }[];
+    try { rows = JSON.parse(String(form.get("rows") ?? "[]")); } catch { return { error: "The CSV couldn't be read." }; }
+    const { sites: all } = await companySites(admin, companyId);
+    const byId = new Map(all.map((x) => [x.id, x]));
+    const byName = new Map(all.map((x) => [x.name.trim().toLowerCase(), x]));
+    const by = session.onlineAccessInfo?.associated_user?.email ?? "Clearchoice staff (CSV import)";
+    let updated = 0;
+    const unknown: string[] = [];
+    const bad: string[] = [];
+    for (const r of rows) {
+      const site = (r.siteId && byId.get(r.siteId)) || (r.site ? byName.get(r.site.trim().toLowerCase()) : undefined);
+      if (!site) { unknown.push(r.site || r.siteId || "(no name)"); continue; }
+      try {
+        await saveSiteBudgets(session.shop, companyId, { id: site.id, name: site.name }, r.values, by);
+        updated++;
+      } catch (e) {
+        bad.push(`${site.name}: ${(e as Error).message}`);
+      }
+    }
+    const parts = [`Imported budgets for ${updated} site${updated === 1 ? "" : "s"}.`];
+    if (unknown.length) parts.push(`Not found (check the name or Site ID): ${unknown.slice(0, 8).join(", ")}${unknown.length > 8 ? "…" : ""}.`);
+    if (bad.length) parts.push(`Not saved: ${bad.slice(0, 5).join("; ")}.`);
+    return unknown.length || bad.length ? { error: parts.join(" ") } : { synced: parts[0]! };
+  }
   if (intent === "po") {
     const on = form.get("noPo") === "1";
     await setPoNotRequired(graphqlFor(admin), companyId, on, `${session.onlineAccessInfo?.associated_user?.email ?? "Clearchoice staff"} (admin)`);
@@ -278,10 +305,90 @@ const statusLabel: Record<string, string> = {
   rejected: "Declined",
 };
 
+// ---------- budgets CSV (export and import happen in the browser; the import is saved by the action)
+
+const csvCell = (v: unknown) => {
+  const t = String(v ?? "");
+  return /[",\n]/.test(t) ? `"${t.replace(/"/g, '""')}"` : t;
+};
+
+function parseCsv(text: string): string[][] {
+  const rows: string[][] = [];
+  let row: string[] = [];
+  let cell = "";
+  let quoted = false;
+  const src = text.replace(/^\uFEFF/, "");
+  for (let i = 0; i < src.length; i++) {
+    const ch = src[i]!;
+    if (quoted) {
+      if (ch === '"' && src[i + 1] === '"') { cell += '"'; i++; }
+      else if (ch === '"') quoted = false;
+      else cell += ch;
+    } else if (ch === '"') quoted = true;
+    else if (ch === ",") { row.push(cell); cell = ""; }
+    else if (ch === "\n" || ch === "\r") {
+      if (ch === "\r" && src[i + 1] === "\n") i++;
+      row.push(cell); rows.push(row); row = []; cell = "";
+    } else cell += ch;
+  }
+  if (cell || row.length) { row.push(cell); rows.push(row); }
+  return rows.filter((r) => r.some((c) => c.trim()));
+}
+
+/** Header "Oct 2026 (2026-10)" → "2026-10"; "Every month" → "default". */
+function columnKey(h: string): string | null {
+  if (/every\s*month/i.test(h)) return "default";
+  const m = /(\d{4}-\d{2})/.exec(h);
+  return m ? m[1]! : null;
+}
+
 export default function Budgets() {
   const data = useLoaderData<typeof loader>();
   const result = useActionData<typeof action>();
   const busy = useNavigation().state !== "idle";
+  const submit = useSubmit();
+  const [importError, setImportError] = useState("");
+
+  function exportCsv() {
+    if (!data.company) return;
+    const header = ["Site", "Every month", ...data.months.map((m, i) => `${data.labels[i]} (${m})`), "Site ID"];
+    const lines = data.company.sites.map((x) =>
+      [x.name, x.default ?? "", ...x.months.map((v) => v ?? ""), x.id].map(csvCell).join(","),
+    );
+    const blob = new Blob(["\uFEFF" + [header.map(csvCell).join(","), ...lines].join("\r\n")], { type: "text/csv;charset=utf-8" });
+    const a = document.createElement("a");
+    a.href = URL.createObjectURL(blob);
+    a.download = `${data.company.name.replace(/[^A-Za-z0-9]+/g, "-")}-budgets-${data.quarter?.key ?? ""}.csv`;
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+  }
+
+  async function importCsv(file: File) {
+    setImportError("");
+    const rows = parseCsv(await file.text());
+    const header = rows.shift()?.map((h) => h.trim()) ?? [];
+    const siteCol = header.findIndex((h) => /^site$/i.test(h));
+    const idCol = header.findIndex((h) => /^site id$/i.test(h));
+    const valueCols = header.map((h, i) => ({ i, key: columnKey(h) })).filter((c) => c.key);
+    if (siteCol < 0 && idCol < 0) return setImportError('The CSV needs a "Site" or "Site ID" column. Export first and use that file as the template.');
+    if (!valueCols.length) return setImportError('The CSV needs an "Every month" column and/or month columns like "Oct 2026 (2026-10)".');
+    const bad: string[] = [];
+    const out = rows.map((r, n) => {
+      const values: Record<string, number | null> = {};
+      for (const c of valueCols) {
+        const raw = (r[c.i] ?? "").replace(/[$,\s]/g, "");
+        if (!raw) values[c.key!] = null;
+        else if (Number.isFinite(Number(raw)) && Number(raw) >= 0) values[c.key!] = Number(raw);
+        else bad.push(`row ${n + 2}: "${r[c.i]}"`);
+      }
+      return { site: siteCol >= 0 ? r[siteCol] : undefined, siteId: idCol >= 0 ? r[idCol] : undefined, values };
+    });
+    if (bad.length) return setImportError(`Not a valid amount: ${bad.slice(0, 5).join(", ")}${bad.length > 5 ? "…" : ""}. Nothing was imported.`);
+    if (!data.company) return;
+    if (!window.confirm(`Import budgets for ${out.length} site${out.length === 1 ? "" : "s"}? Blank cells remove that budget.`)) return;
+    submit({ intent: "import", company: data.company.id, quarter: data.quarter?.key ?? "", rows: JSON.stringify(out) }, { method: "post" });
+  }
   const [params] = useSearchParams();
   // Site search: hides non-matching rows (they stay in the form, so saving keeps their amounts).
   const [siteFilter, setSiteFilter] = useState("");
@@ -337,9 +444,25 @@ export default function Budgets() {
           </Form>
         </s-section>
         <s-section heading={`${data.company.name}: monthly budgets (goods ex GST)`}>
+          <div style={{ display: "flex", justifyContent: "flex-end", gap: 8, flexWrap: "wrap", marginBottom: 8 }}>
+            <s-button onClick={exportCsv}>Export CSV</s-button>
+            <label style={{ display: "inline-flex" }}>
+              <input
+                type="file"
+                accept=".csv,text/csv"
+                style={{ display: "none" }}
+                onChange={(e) => { const f = e.currentTarget.files?.[0]; e.currentTarget.value = ""; if (f) void importCsv(f); }}
+                id="budgets-import"
+              />
+              <s-button onClick={() => document.getElementById("budgets-import")?.click()}>Import CSV</s-button>
+            </label>
+          </div>
+          {importError && <s-banner tone="critical">{importError}</s-banner>}
           <s-paragraph>
             "Every month" applies unless a month has its own amount. Leave blank for no budget (orders are never held for
             approval). Orders that would take a site over its budget are emailed to the company's head-office admin.
+            To edit many sites at once: Export CSV, change the amounts in Excel (keep the header and Site ID columns), save as
+            CSV and Import CSV. It covers the quarter shown; blank cells remove that budget.
           </s-paragraph>
           {result && "error" in result && <s-banner tone="critical">{result.error}</s-banner>}
           {result && "saved" in result && <s-banner tone="success">Budgets saved.</s-banner>}
