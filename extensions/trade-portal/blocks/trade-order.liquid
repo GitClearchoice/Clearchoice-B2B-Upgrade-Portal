@@ -78,10 +78,14 @@
       is dropped by the browser (and a submit button would send the theme's form to checkout).
     {%- endcomment -%}
     <div class="cc-trade-order__form" data-cc-form>
-      <label class="cc-trade-order__no-po cc-trade-order__company-no-po">
+      {%- comment -%} Only the head-office admin can change this (shown once the app confirms who they are). {%- endcomment -%}
+      <label class="cc-trade-order__no-po cc-trade-order__company-no-po" data-cc-company-no-po-wrap hidden>
         <input type="checkbox" data-cc-company-no-po {% if no_po %}checked{% endif %}>
         We don't use purchase orders <small>(applies to all our orders until unticked)</small>
       </label>
+      {%- if no_po -%}
+        <p class="cc-trade-order__po-help" data-cc-company-no-po-note>Your company doesn't use purchase orders (set by your head-office admin).</p>
+      {%- endif -%}
       <label>
         <span data-cc-po-label>{% if no_po %}PO number (optional){% else %}PO number{% if block.settings.po_required %} *{% endif %}{% endif %}</span>
         <input type="text" data-cc-po maxlength="80" autocomplete="off" {% if block.settings.po_required %}aria-required="true"{% endif %}>

@@ -1,6 +1,8 @@
 import type { LoaderFunctionArgs } from "react-router";
 import { authenticate } from "../shopify.server";
 import { budgetRepo } from "../budget.server";
+import { graphqlFor, orderDeps } from "../orders.server";
+import { findApprover } from "../../src/orders/placeOrder.ts";
 import { BUYER_QUERY, BuyerError, buyerContext, type BuyerQueryData } from "../../src/b2b/buyer.ts";
 import { budgetStatus, monthLabel } from "../../src/orders/budget.ts";
 
@@ -18,8 +20,13 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
     const { data } = (await res.json()) as { data: BuyerQueryData };
     const buyer = buyerContext(data, url.searchParams.get("location"));
     if (!buyer) return json({ trade: false });
-    const s = await budgetStatus(budgetRepo, session.shop, buyer.site.id, new Date());
-    return json({ trade: true, site: buyer.site.name, monthLabel: monthLabel(s.month), ...s });
+    const [s, approver] = await Promise.all([
+      budgetStatus(budgetRepo, session.shop, buyer.site.id, new Date()),
+      findApprover(orderDeps(graphqlFor(admin)), buyer.companyId),
+    ]);
+    // isAdmin: this buyer is the company's head-office admin (can change company settings in the cart).
+    const isAdmin = !!approver && !approver.isStaff && !!buyer.email && approver.email.toLowerCase() === buyer.email.toLowerCase();
+    return json({ trade: true, site: buyer.site.name, monthLabel: monthLabel(s.month), isAdmin, ...s });
   } catch (e) {
     if (e instanceof BuyerError) return json({ error: e.message }, 400);
     throw e;

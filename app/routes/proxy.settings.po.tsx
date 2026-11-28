@@ -1,12 +1,13 @@
 import type { ActionFunctionArgs } from "react-router";
 import { authenticate } from "../shopify.server";
-import { graphqlFor } from "../orders.server";
+import { graphqlFor, orderDeps } from "../orders.server";
+import { findApprover } from "../../src/orders/placeOrder.ts";
 import { setPoNotRequired } from "../po-setting.server";
 import { BUYER_QUERY, BuyerError, buyerContext, type BuyerQueryData } from "../../src/b2b/buyer.ts";
 
 // POST https://<shop>/apps/b2b/settings/po  (JSON) { notRequired: boolean }
-// The cart's "We don't use purchase orders" tick box: saved on the company, so it stays for every
-// order (and every buyer of that company) until it's unticked.
+// The cart's "We don't use purchase orders" tick box (head-office admin only): saved on the company, so
+// it stays for every order (and every buyer of that company) until it's unticked.
 export const action = async ({ request }: ActionFunctionArgs) => {
   if (request.method !== "POST") return json({ error: "POST only" }, 405);
   const { admin } = await authenticate.public.appProxy(request);
@@ -21,6 +22,11 @@ export const action = async ({ request }: ActionFunctionArgs) => {
     const data = await shopify<BuyerQueryData>(BUYER_QUERY, { id: `gid://shopify/Customer/${customerId}` });
     const buyer = buyerContext(data);
     if (!buyer) return json({ error: "Your account isn't set up for trade ordering" }, 403);
+    // Only the company's head-office admin (the budget approver) can change it.
+    const approver = await findApprover(orderDeps(shopify), buyer.companyId);
+    if (!approver || approver.isStaff || !buyer.email || approver.email.toLowerCase() !== buyer.email.toLowerCase()) {
+      return json({ error: "Only your head-office admin can change this setting." }, 403);
+    }
     await setPoNotRequired(shopify, buyer.companyId, body.notRequired === true, `${buyer.name}${buyer.email ? ` <${buyer.email}>` : ""} (cart)`);
     return json({ ok: true, notRequired: body.notRequired === true });
   } catch (e) {

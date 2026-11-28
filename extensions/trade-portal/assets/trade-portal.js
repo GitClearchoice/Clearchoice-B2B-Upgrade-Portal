@@ -239,7 +239,17 @@
       if (!budgetEl) return Promise.resolve(null);
       return fetch(proxy + "/budget" + (location ? "?location=" + encodeURIComponent(location) : ""), { headers: { Accept: "application/json" }, credentials: "same-origin" })
         .then(readJson)
-        .then(function (b) { budget = b && b.trade && b.budget != null ? b : null; return budget; })
+        .then(function (b) {
+          // The head-office admin gets the "We don't use purchase orders" tick box.
+          if (b && b.isAdmin) {
+            var wrap = el.querySelector("[data-cc-company-no-po-wrap]");
+            var note = el.querySelector("[data-cc-company-no-po-note]");
+            if (wrap) wrap.hidden = false;
+            if (note) note.hidden = true;
+          }
+          budget = b && b.trade && b.budget != null ? b : null;
+          return budget;
+        })
         .catch(function () { budget = null; return null; }); // the server checks the budget anyway
     }
 
