@@ -148,7 +148,7 @@
     var poHelpEl = el.querySelector("[data-cc-po-help]");
     var poRequiredMark = poRequired ? " *" : "";
     // No PO yet: the buyer enters their first and last name instead, and the order goes to Clearchoice
-    // with Customer Reference "PO TO FOLLOW - <name>" so staff know to request the PO.
+    // with Customer Reference "PO REQUIRED - <name>" so staff know to request the PO.
     if (noPoEl) {
       noPoEl.addEventListener("change", function () {
         var on = noPoEl.checked;
@@ -161,7 +161,7 @@
     }
     function poValue() {
       var v = poEl.value.trim();
-      if (noPoEl && noPoEl.checked) return v ? ("PO TO FOLLOW - " + v).slice(0, 100) : "";
+      if (noPoEl && noPoEl.checked) return v ? ("PO REQUIRED - " + v).slice(0, 100) : "";
       return v;
     }
     var budgetEl = el.querySelector("[data-cc-budget]");
