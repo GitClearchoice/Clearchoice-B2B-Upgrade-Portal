@@ -210,3 +210,23 @@ ${rows.map((r) => `<tr><td style="${cell}"><b>${esc(r.unleashedOrderNumber ?? r.
   const text = `${intro}\n\n${rows.map((r) => `${r.unleashedOrderNumber ?? r.reference ?? ""} | ${r.companyName} – ${r.siteName} | ${r.buyerName}${r.buyerEmail ? ` <${r.buyerEmail}>` : ""} | placed ${date(r.placed)} (${days(r.placed)} days) | ${money(r.goodsExGst)} ex GST`).join("\n")}`;
   return { subject, html, text };
 }
+
+/** To someone a head-office admin has given ordering access in the trade portal. */
+export function siteAccessEmail(p: { name: string; companyName: string; adminName: string; role: string; sites: string[]; loginUrl: string }): Email {
+  const subject = `You can now order for ${p.companyName} in the Clearchoice trade portal`;
+  const sitesText = p.sites.length > 6 ? `${p.sites.slice(0, 6).join(", ")} and ${p.sites.length - 6} more` : p.sites.join(", ");
+  const intro = `Hi ${p.name}, ${p.adminName} has given you ${p.role === "admin" ? "location admin" : "ordering"} access for ${p.companyName}: ${sitesText}.`;
+  const how = `Log in with this email address at ${p.loginUrl} (we'll email you a one-time code). You'll see your trade prices and can place orders for your site${p.sites.length === 1 ? "" : "s"}.`;
+  return {
+    subject,
+    html: layout("Trade portal access", `<p>${esc(intro)}</p><p>${esc(how)}</p><p style="margin:20px 0"><a href="${esc(p.loginUrl)}" style="display:inline-block;background:${BRAND};color:#fff;font-weight:bold;font-size:16px;text-decoration:none;padding:12px 24px;border-radius:6px">Log in</a></p>`),
+    text: `${intro}\n\n${how}`,
+  };
+}
+
+/** To Clearchoice staff when a head-office admin changes who can order for their sites. */
+export function teamChangeEmail(p: { companyName: string; adminName: string; change: string }): Email {
+  const subject = `Site access changed: ${p.companyName}`;
+  const intro = `${p.adminName} changed who can order for ${p.companyName}:`;
+  return { subject, html: layout("Site access changed", `<p>${esc(intro)}</p><p><b>${esc(p.change)}</b></p>`), text: `${intro}\n\n${p.change}` };
+}
