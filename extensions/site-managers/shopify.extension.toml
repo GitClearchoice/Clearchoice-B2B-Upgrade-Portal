@@ -1,0 +1,18 @@
+# Customer account page "Site managers" for the company's head-office admin: who can order for which
+# sites (Shopify company contacts with "Ordering only" or "Location admin" on chosen sites). Add,
+# change and remove people. Backend: /customer/team on the app. Add it to the customer account menu
+# and the trade account menu (Content → Menus → add the "Site managers" app page).
+api_version = "2026-01"
+
+[[extensions]]
+name = "Site managers"
+handle = "site-managers"
+type = "ui_extension"
+
+  [[extensions.targeting]]
+  module = "./src/SiteManagers.jsx"
+  target = "customer-account.page.render"
+
+  [extensions.capabilities]
+  # Calls the app's own backend (https://clearchoice-b2b.onrender.com).
+  network_access = true
