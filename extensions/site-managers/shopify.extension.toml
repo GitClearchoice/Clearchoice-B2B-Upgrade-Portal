@@ -3,6 +3,7 @@
 # change and remove people. Backend: /customer/team on the app. Add it to the customer account menu
 # and the trade account menu (Content → Menus → add the "Site managers" app page).
 api_version = "2026-01"
+uid = "a466f911-11fa-dfcf-ce1d-0bb95a036a14cd0bf799"
 
 [[extensions]]
 name = "Site managers"
